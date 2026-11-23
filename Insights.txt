@@ -1,0 +1,25 @@
+Tracking:
+Needs opponent context. Good vs. bad teams. 
+W-L record. 
+Situations (leading/tied/trailing)
+
+Must include player names so teams can use it to eval indiv players, helping make descisions.
+
+
+
+Claude:
+level 3 would make my tracking take a little longer. 
+
+
+
+level 4: tracking an extra 5-10 games will take even more time. ?
+
+for level 5, do i choose a certain number of players or track all of them? This would also take a lot of additional tracking time. 
+
+
+
+for level 6, could you do something of the sort with what i have now? Is xG that I see everywhere being used, using shot location? Would i need the single metric created in order to train a model? What are the prereqs?
+
+
+
+My main issue is I don't want to spend 2 hours each game manually tracking. I need it to be automatically done, i don't trust any humans to do it either. If i can be more efficient in my tracking I can get more data

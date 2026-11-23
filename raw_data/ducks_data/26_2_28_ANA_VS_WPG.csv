@@ -1,0 +1,94 @@
+Team,Game_Clock,Period,Event,Is_Scoring_Chance,Penalty_Drawn,Led_To_Goal,Shot_Result
+Ducks,19:50,1,"DZ Blueline Play Shut Down",NO,NO,NO,
+Ducks,19:47,1,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,19:33,1,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,19:00,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,18:54,1,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,18:14,1,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,16:41,1,"Shot With Traffic",NO,NO,NO,Save
+Ducks,15:59,1,"DZ Blueline Play Shut Down",NO,NO,NO,
+Ducks,15:51,1,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,15:50,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,15:34,1,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,15:10,1,"Shot With Traffic",NO,NO,NO,Save
+Ducks,11:50,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,11:42,1,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,09:53,1,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,08:57,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,08:54,1,"Activated D-Man (OZ)",YES,NO,NO,
+Ducks,08:33,1,"DZ Blueline Play Shut Down",NO,NO,NO,
+Ducks,07:47,1,"OZ Turnover Forced",YES,NO,NO,
+Ducks,06:44,1,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,06:35,1,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,02:13,1,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,02:01,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,01:55,1,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,01:45,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,01:15,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,01:09,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,00:36,1,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,00:27,1,"OZ Turnover Forced",NO,NO,NO,
+Ducks,19:10,2,"Rush Shot (<5s After Zone Entry)",YES,NO,NO,Save
+Ducks,18:52,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,18:44,2,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,17:05,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,17:02,2,"Shot With Traffic",NO,NO,NO,Save
+Ducks,17:01,2,"2nd Scoring Chance (Same Possession)",YES,NO,NO,Save
+Ducks,13:20,2,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,13:18,2,"Rush Shot (<5s After Zone Entry)",YES,NO,NO,Save
+Ducks,13:03,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,12:44,2,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,12:42,2,"Rush Shot (<5s After Zone Entry)",YES,NO,NO,Save
+Ducks,12:26,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,10:43,2,"Rush Shot (<5s After Zone Entry)",NO,NO,NO,Save
+Ducks,10:03,2,"Rush Shot (<5s After Zone Entry)",YES,NO,NO,Save
+Ducks,08:45,2,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,08:08,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,07:46,2,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,07:43,2,"Rush Shot (<5s After Zone Entry)",YES,NO,NO,Save
+Ducks,07:34,2,"DZ Blueline Play Shut Down",NO,NO,NO,
+Ducks,07:25,2,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,07:25,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,06:47,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,04:34,2,"Shot With Traffic",NO,NO,NO,Save
+Ducks,03:45,2,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,03:37,2,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,03:30,2,"Shot With Traffic",NO,NO,NO,Save
+Ducks,03:05,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,03:00,2,"Activated D-Man (OZ)",YES,NO,NO,
+Ducks,02:34,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,01:48,2,"OZ Turnover Forced",NO,NO,NO,
+Ducks,01:00,2,"OZ Turnover Forced",YES,NO,NO,
+Ducks,00:51,2,"Shot With Traffic",NO,NO,NO,Save
+Ducks,00:41,2,"Shot With Traffic",NO,NO,YES,Goal
+Ducks,00:21,2,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,00:01,2,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,19:39,3,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,19:29,3,"Shot With Traffic",YES,NO,NO,Miss
+Ducks,17:38,3,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,17:08,3,"Shot With Traffic",NO,NO,NO,Save
+Ducks,16:16,3,"DZ Blueline Play Shut Down",NO,NO,NO,
+Ducks,15:12,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,15:08,3,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,14:55,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,14:45,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,12:48,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,11:53,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,11:49,3,"Shot With Traffic",NO,NO,NO,Save
+Ducks,11:43,3,"Activated D-Man (OZ)",YES,NO,NO,
+Ducks,10:42,3,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,10:38,3,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,10:28,3,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,10:27,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,10:11,3,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,10:03,3,"Early Possession Shot (<10s)",NO,NO,NO,Save
+Ducks,10:02,3,"Activated D-Man (OZ)",NO,NO,YES,
+Ducks,09:59,3,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,09:40,3,"D-Man Aggressive Gap Close",NO,NO,NO,
+Ducks,09:36,3,"OZ Turnover Forced",NO,NO,NO,
+Ducks,09:19,3,"Activated D-Man (OZ)",NO,NO,NO,
+Ducks,09:07,3,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,06:43,3,"Stretch Pass → OZ Possession",NO,NO,NO,
+Ducks,03:11,3,"DZ → OZ Transition Completed",NO,NO,NO,
+Ducks,03:11,3,"Rush Shot (<5s After Zone Entry)",NO,NO,YES,Goal
+Ducks,00:20,3,"DZ Blueline Play Shut Down",NO,NO,NO,
