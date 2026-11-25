@@ -6,13 +6,14 @@ from PIL import ImageGrab
 import pytesseract
 import keyboard
 import re
+from pathlib import Path
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # === CONFIGURATION ===
-BASE_DIR = r"C:\Users\khanm\Desktop\stat_tracker"
-CONFIG_FILE = os.path.join(BASE_DIR, "broadcast_configs.json")
-OUTPUT_DIR = os.path.join(BASE_DIR, "raw_data")
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = BASE_DIR / "OCR Tracker" / "broadcast_configs.json"
+OUTPUT_DIR = BASE_DIR / "raw_data"
 
 # Default broadcast configurations (you'll customize these)
 DEFAULT_CONFIGS = {
