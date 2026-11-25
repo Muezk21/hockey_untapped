@@ -3,9 +3,10 @@ from tkinter import simpledialog, messagebox
 from PIL import ImageGrab, ImageTk
 import json
 import os
+from pathlib import Path
 
-BASE_DIR = r"C:\Users\khanm\Desktop\stat_tracker"
-CONFIG_FILE = os.path.join(BASE_DIR, "broadcast_configs.json")
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = BASE_DIR / "OCR Tracker" / "broadcast_configs.json"
 
 class BroadcastCalibrator:
     def __init__(self):
