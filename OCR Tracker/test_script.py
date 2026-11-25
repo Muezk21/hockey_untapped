@@ -1,11 +1,14 @@
 from PIL import ImageGrab
 import pytesseract
+from pathlib import Path
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # Use your saved clock region
 import json
-with open(r'C:\Users\khanm\Desktop\stat_tracker\broadcast_configs.json', 'r') as f:
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = BASE_DIR / "OCR Tracker" / "broadcast_configs.json"
+with open(CONFIG_FILE, 'r') as f:
     config = json.load(f)
 
 # Get the first broadcast config
