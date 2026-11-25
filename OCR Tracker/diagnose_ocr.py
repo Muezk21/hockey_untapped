@@ -1,11 +1,14 @@
 from PIL import ImageGrab
 import pytesseract
 import json
+from pathlib import Path
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Load your config
-with open(r'C:\Users\khanm\Desktop\stat_tracker\broadcast_configs.json', 'r') as f:
+# Load the shared broadcast config
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = BASE_DIR / "OCR Tracker" / "broadcast_configs.json"
+with open(CONFIG_FILE, 'r') as f:
     configs = json.load(f)
 
 # Test each broadcast
