@@ -1,20 +1,20 @@
 # Hockey Untapped
 
-Hockey Untapped is a Python-based hockey tracking and analytics project. It combines manually tagged game events with NHL data and analysis scripts to evaluate team and player performance.
+Hockey Untapped is a hockey tracking and analytics project combining manually observed events with NHL game data and analysis scripts.
 
 ## Project areas
 
-- **Live event tracking:** `OCR Tracker/ocr_tracker.py` records manually tagged events and exports them to CSV.
-- **Scoreboard capture tools:** `OCR Tracker/calibrate_broadcast.py` saves screen coordinates for a broadcast's game clock and period; `OCR Tracker/diagnose_ocr.py` tests the configured clock regions.
-- **NHL data exploration:** `nhl_probe.py` queries NHL web endpoints for a team's schedule and a selected game's play-by-play data.
-- **Data processing and analysis:** `preprocess_events.py`, `master_data_script.py`, `analytics.py`, and `dman_impact.py` support data preparation, aggregation, and analysis.
+- **HTML event tracker:** Browser-based interface for selecting teams, entering game details, recording events with hotkeys, tagging outcomes, and exporting CSV.
+- **OCR experiments:** `OCR Tracker/ocr_tracker.py` and its calibration/diagnostic tools explore automatic clock and period capture from a scoreboard. This is separate from the HTML event tracker.
+- **NHL data exploration:** `nhl_probe.py` and live API tests query NHL web endpoints for schedules, game state, clock, and play-by-play.
+- **Data processing and analysis:** `preprocess_events.py`, `master_data_script.py`, `analytics.py`, and `dman_impact.py` support data preparation and analysis.
 - **Data:** `raw_data/`, `enriched_data/`, `analytics_reports/`, and `master_dataset.csv` contain tracking and analysis outputs. Older material is kept under `archive/`.
 
-## Current live tracker
+## HTML event tracker
 
-The current tracker uses keyboard hotkeys to record events while a separate loop reads the game clock and period from a selected on-screen scoreboard using OCR.
+The current HTML/JavaScript tracker supports team, opponent, date, period, and game-clock fields; keyboard event logging; scoring-chance, penalty, and goal tags; optional shot-result selection; undo; and CSV export.
 
-### Event controls
+Current event hotkeys:
 
 | Key | Event |
 |---|---|
@@ -34,49 +34,54 @@ The current tracker uses keyboard hotkeys to record events while a separate loop
 | a | Activated D-Man (OZ) |
 | l | Lost Possession |
 
-Modifiers apply to the most recently logged event: `s` = scoring chance, `p` = penalty drawn, `g` = led to goal. `Backspace` undoes the last event; `Esc` stops tracking and exports the session CSV.
+Modifiers apply to the most recently logged event: `s` = scoring chance, `p` = penalty drawn, `g` = led to goal. `Backspace` undoes the last event. The CSV contains team, game clock, period, event, outcome flags, and shot result.
 
-The CSV includes team, game clock, period, event, scoring-chance flag, penalty flag, goal flag, and shot-result field.
+The HTML tracker currently relies on manually supplied game-clock and period values. The goal of the API work is to populate these automatically without disrupting the existing event workflow or CSV output.
 
-## Setup
+## Setup and OCR tools
 
-Use Python 3 on Windows. Install the Python packages used by the OCR tracker:
+The Python OCR experiments use Python 3 on Windows. Install the packages used by the OCR tracker with:
 
 ```powershell
 python -m pip install Pillow pytesseract keyboard
 ```
 
-Install the Tesseract OCR application separately and ensure its executable path matches the setting near the top of `OCR Tracker/ocr_tracker.py` (currently `C:\\Program Files\\Tesseract-OCR\\tesseract.exe`).
+Install the Tesseract OCR application separately and ensure its executable path matches the setting in `OCR Tracker/ocr_tracker.py`.
 
-Run the tracker from the project directory:
+Run the OCR tracker from the project directory:
 
 ```powershell
 python "OCR Tracker/ocr_tracker.py"
 ```
 
-The tracker asks for a configured scoreboard profile, team, opponent, and game date. Keep the scoreboard visible on the captured desktop while tracking.
+The OCR tools are experimental and are not required for the HTML event tracker.
 
 ## Recent development notes (November 23–25, 2026)
 
-- Set up and tested the Python OCR dependencies, including Pillow and pytesseract; the Tesseract executable is configured separately from the Python package.
-- Added the OCR tracker workflow and supporting calibration, diagnostic, and test scripts.
-- Updated the tracker and supporting scripts to resolve project paths from each script's location, using a shared `OCR Tracker/broadcast_configs.json` and a project-level `raw_data/` output directory. This avoids depending on the current PowerShell working directory.
-- Created and adjusted broadcast-specific clock and period capture regions. Screen capture troubleshooting included moving the game feed to the primary monitor and checking the captured desktop coordinates.
-- Diagnosed inconsistent clock recognition. A manual preprocessing test (grayscale, 4× resize, increased contrast, and sharpening) successfully read `18:02` across multiple Tesseract page-segmentation modes. This was a successful test, not yet an integrated change to the tracker.
-- Confirmed that OCR can be sensitive to scoreboard layout, region placement, and image quality. The tracker currently retains its last successfully read clock if a later OCR read fails, so stale timestamps still need handling before dependable long sessions.
-- Began NHL API exploration in `nhl_probe.py`. The current probe retrieves a team schedule, selects a completed game, and inspects its play-by-play events and situation codes. It does not yet provide the live clock to the tracker.
+- Set up and tested Python OCR dependencies and configured Tesseract separately.
+- Built and tested broadcast-specific screen regions for clock and period capture. Screen-coordinate troubleshooting included moving the game feed to the primary monitor.
+- Diagnosed inconsistent OCR clock recognition. A manual image-preprocessing test successfully read `18:02`, but that preprocessing was not integrated into the OCR tracker.
+- Identified an OCR reliability issue: failed reads can leave the previous clock value in place, creating potentially stale timestamps.
+- Continued NHL API exploration using the public NHL web endpoints.
+- Successfully retrieved the current scoreboard from `/v1/score/now`, identified live games and game IDs, and fetched a live game's landing data.
+- Live-tested `/v1/gamecenter/{game_id}/landing`. The response provided game status, period, time remaining, seconds remaining, clock-running state, intermission state, score, and shots on goal.
+- Confirmed a live clock sample for Utah @ Minnesota (game ID `2026020396`): the API returned period 2, 08:36 remaining, `running: true`, and `inIntermission: false`. This validates API clock retrieval during live play; broader reliability and update-cadence testing remain outstanding.
 
-## Next development step: NHL API clock source
+## Next development steps
 
-Before changing the live tracker, validate the NHL web API against an active game. The likely starting points are:
+1. Inspect live play-by-play from `/v1/gamecenter/{game_id}/play-by-play` and catalogue which events, players, teams, timestamps, and rink details are available.
+2. Compare API events with the HTML tracker's manual categories. Identify which events can be automated reliably and which still require human observation.
+3. Build a small standalone API test before integrating anything into the HTML tracker.
+4. Once validated, connect the API clock and period to the HTML tracker while preserving its hotkeys, event definitions, outcome tags, undo, and CSV format.
+5. Reassess the event taxonomy based on the data available and the defensive-performance questions Hockey Untapped is intended to answer.
 
-- `https://api-web.nhle.com/v1/score/now` to find current games and their game IDs.
-- `https://api-web.nhle.com/v1/gamecenter/{game_id}/landing` to inspect one game's live state, period, and clock.
-- `https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play` for event-level play-by-play data.
+## NHL API endpoints and caveats
 
-These are publicly accessible NHL website endpoints, not a guaranteed stable, officially supported developer API. Verify the live response fields, update cadence, pause/intermission behavior, and reliability before depending on them.
+- `https://api-web.nhle.com/v1/score/now` — current scoreboard and game IDs.
+- `https://api-web.nhle.com/v1/gamecenter/{game_id}/landing` — game state, clock, period, score, and other game summary data.
+- `https://api-web.nhle.com/v1/gamecenter/{game_id}/play-by-play` — event-level game timeline.
 
-The planned design is to keep the existing hotkeys, event definitions, event modifiers, and CSV export. Replace only the clock/period provider with a small data-source layer: NHL API as the preferred source, with OCR retained as an optional fallback if needed. Do not remove the OCR tools until the API path has passed live-game testing.
+These are publicly accessible NHL website endpoints, not a guaranteed stable, officially supported developer API. Validate response fields, update cadence, and reliability before depending on them.
 
 ## Important metric notes
 
