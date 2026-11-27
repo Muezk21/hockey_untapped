@@ -2,7 +2,7 @@ import time
 import json
 import os
 from datetime import datetime
-from PIL import ImageGrab
+from PIL import ImageGrab, ImageEnhance, ImageFilter
 import pytesseract
 import keyboard
 import re
@@ -97,17 +97,29 @@ def clean_clock_text(text):
     return None
 
 def read_clock(config):
-    """Read game clock from screen"""
+    """Read game clock from screen with image preprocessing"""
     image = capture_region(config["clock_region"])
     if image is None:
         return None
-    
+
     try:
-        # Configure tesseract for single line of text
-        custom_config = '--psm 7 -c tessedit_char_whitelist=0123456789:'
-        text = pytesseract.image_to_string(image, config=custom_config)
-        clock = clean_clock_text(text)
-        return clock
+        # Improve image quality for OCR
+        image = image.convert("L")
+        image = image.resize((image.width * 4, image.height * 4))
+        image = ImageEnhance.Contrast(image).enhance(2.5)
+        image = image.filter(ImageFilter.SHARPEN)
+
+        custom_config = (
+            '--psm 7 -c tessedit_char_whitelist=0123456789:'
+        )
+
+        text = pytesseract.image_to_string(
+            image,
+            config=custom_config
+        )
+
+        return clean_clock_text(text)
+
     except Exception as e:
         print(f"❌ OCR error: {e}")
         return None

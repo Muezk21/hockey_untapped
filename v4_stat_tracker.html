@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hockey Untapped – Post-Game Tracker (v5)</title>
+<style>
+  :root { --team-color: #F47A1F; }
+  body { font-family: Arial, sans-serif; background:#111; color:#fff; padding:20px; }
+  h1, h2, h3 { color: var(--team-color); margin-bottom: 6px; }
+  h3 { margin-top: 0; }
+  label { display:inline-block; margin:6px 12px 6px 0; }
+  input, select, button { padding:6px; margin-top:4px; font-size:14px; }
+  button { cursor:pointer; }
+  .panel { background:#1b1b1b; border:1px solid #333; border-radius:8px; padding:14px; margin:14px 0; }
+  .small { color:#aaa; font-size:12px; }
+  .warn { background:#7a1f1f; border:2px solid #ff6b6b; padding:10px; border-radius:6px; margin:10px 0; display:none; }
+  #status, #msg { margin:8px 0; min-height:18px; }
+  #msg.err { color:#ff8a80; }
+  #msg.ok { color:#9be39b; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; background:#333; margin-left:8px; }
+  .pill.on { background:#2e7d32; }
+  .keybtn { margin-right:6px; }
+  .keybtn b { color:var(--team-color); }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
+  th, td { border:1px solid #333; padding:5px 6px; text-align:left; }
+  th { background:#222; position:sticky; top:0; z-index:1; }
+  .wrap { max-height:46vh; overflow:auto; }
+  #shotBody tr { cursor:pointer; }
+  #shotBody tr:hover { background:#232323; }
+  #shotBody tr.opp { color:#888; }
+  #shotBody tr.goal { background:#1f3b21; }
+  #shotBody tr.sel { background:#4a3b00 !important; outline:3px solid #ffd54f; outline-offset:-3px; }
+  #shotBody tr.sel td:first-child { font-weight:bold; color:#ffd54f; }
+  .tag { display:inline-block; background:#1565c0; border-radius:3px; padding:1px 5px; margin-right:3px; font-size:11px; }
+  .tag.sec { background:#6a1b9a; }
+  #detail { border:2px solid #444; border-radius:6px; padding:10px; margin-top:10px; background:#161616; }
+  #detail.active { border-color:#ffd54f; }
+  .tagrow label { margin-right:16px; }
+  .cls-unclassified { color:#ffb74d; }
+  .cls-followup { color:#90caf9; }
+  td.num { text-align:right; }
+</style>
+</head>
+<body>
+
+<h1>Hockey Untapped — Post-Game Tracker</h1>
+<div class="small">v4 · shots, results, goals and penalties come from the NHL play-by-play · you add zone entries and your own events</div>
+
+<div id="fileWarning" class="warn"></div>
+
+<!-- 1. IMPORT -->
+<div class="panel">
+  <h3>1. Import a completed NHL game</h3>
+  <div class="row">
+    <label>Game date<br><input id="gameDate" type="date"></label>
+    <button id="loadBtn" onclick="loadGames()">Load Games</button>
+    <label>Game<br><select id="gameSelect" style="min-width:330px"><option value="">Load a date first</option></select></label>
+    <button id="importBtn" onclick="importGame()" disabled>Import Game</button>
+  </div>
+  <div id="status" class="small">Pick a date, then load the NHL games for that day.</div>
+  <div id="gameInfo"></div>
+</div>
+
+<!-- 2. TRACKING -->
+<div class="panel">
+  <h3>2. Your observations <span id="trackPill" class="pill">Hotkeys OFF</span></h3>
+  <div class="row">
+    <label>Team you are analyzing<br>
+      <select id="team" onchange="onTeamChange()">
+        <option value="ANA" selected>Anaheim Ducks (ANA)</option>
+      </select>
+    </label>
+    <label>Opponent<br><input id="opponent" type="text" readonly style="width:90px"></label>
+    <label>Period<br>
+      <select id="period">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="OT">OT</option>
+      </select>
+    </label>
+    <label>Game clock (MM:SS, as shown on the footage)<br>
+      <input id="gameClock" type="text" placeholder="e.g. 12:34" maxlength="5" style="width:90px">
+    </label>
+    <button id="trackBtn" onclick="toggleTracking()">Start Tracking (enable hotkeys)</button>
+  </div>
+  <div id="msg" class="small"></div>
+
+  <div style="margin-top:8px">
+    <b>Zone entries:</b>
+    <button class="keybtn" onclick="logEntry()"><b>I</b> Carry-in (puck carried across OZ blue line)</button>
+  </div>
+  <div style="margin-top:8px">
+    <b>Events:</b>
+    <button class="keybtn" onclick="logManual('DZ → OZ Transition Completed')"><b>3</b> Transition Completed</button>
+    <button class="keybtn" onclick="logManual('Stretch Pass → OZ Possession')"><b>4</b> Stretch Pass to OZ Possession</button>
+    <button class="keybtn" onclick="logManual('DZ Blueline Play Shut Down')"><b>1</b> DZ Blueline Play Shut Down</button>
+    <button class="keybtn" onclick="logManual('D-Man Aggressive Gap Close')"><b>2</b> Gap Close</button>
+    <button class="keybtn" onclick="logManual('OZ Turnover Forced')"><b>=</b> OZ Turnover Forced</button>
+    <button class="keybtn" onclick="logManual('Activated D-Man (OZ)')"><b>A</b> Activated D-Man</button>
+    <button class="keybtn" onclick="logManual('Lost Possession')"><b>L</b> Lost Possession</button>
+  </div>
+  <div style="margin-top:8px">
+    <b>Mark the last event you logged:</b>
+    <button class="keybtn" onclick="markLast('chance')"><b>S</b> Scoring Chance</button>
+    <button class="keybtn" onclick="markLast('penalty')"><b>P</b> Penalty Drawn</button>
+    <button class="keybtn" onclick="markLast('goal')"><b>G</b> Led To Goal</button>
+    <button class="keybtn" onclick="undoLast()"><b>⌫</b> Undo last</button>
+    <button onclick="exportCSV()">Export CSV</button>
+    <button onclick="clearSession()">Clear saved session</button>
+    <span id="saved" class="small"></span>
+  </div>
+</div>
+
+<!-- 3. SHOTS -->
+<div class="panel">
+  <h3>3. Shots from the NHL play-by-play <span id="shotCount" class="small"></span></h3>
+  <label><input type="checkbox" id="fOwn" onchange="renderShots()"> Only the team I'm analyzing</label>
+  <label><input type="checkbox" id="f5v5" onchange="renderShots()"> Only 5v5</label>
+  <span class="small">Click a shot row to select it (yellow). ↑ / ↓ move between shots · Esc deselects.</span>
+
+  <div id="detail">
+    <div id="detailText" class="small">No shot selected. Click a row in the table below.</div>
+    <div class="tagrow" id="tagRow" style="display:none; margin-top:8px">
+      <label><input type="checkbox" id="tChance" onchange="toggleTag('chance')"> <b>C</b> Scoring Chance</label>
+      <label><input type="checkbox" id="tSecond" onchange="toggleTag('second')"> <b>8</b> 2nd Chance</label>
+      <label><input type="checkbox" id="tThird" onchange="toggleTag('third')"> <b>9</b> 3rd+ Chance</label>
+      <label><input type="checkbox" id="tTraffic" onchange="toggleTag('traffic')"> <b>0</b> Shot With Traffic</label>
+      <label><input type="checkbox" id="tLow" onchange="toggleTag('low')"> <b>-</b> Low-Value Shot</label>
+      <div class="small">2nd / 3rd+ chance are scoring chances automatically.</div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th></th><th>#</th><th>Team</th><th>Period</th><th>Clock</th><th>Shooter</th><th>Shot type</th><th>Result</th>
+        <th>Strength</th><th>Classification</th><th>Sec since entry</th><th>Tags</th><th>NHL event ID</th>
+      </tr></thead>
+      <tbody id="shotBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 4. ENTRY LOG -->
+<div class="panel">
+  <h3>4. Zone entry log <span id="entryCount" class="small"></span></h3>
+  <div class="wrap" style="max-height:25vh">
+    <table>
+      <thead><tr><th>Team</th><th>Entry type</th><th>Period</th><th>Clock</th><th></th></tr></thead>
+      <tbody id="entryBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 5. MANUAL EVENTS -->
+<div class="panel">
+  <h3>5. Your other events <span id="manualCount" class="small"></span></h3>
+  <div class="wrap" style="max-height:25vh">
+    <table>
+      <thead><tr><th>Team</th><th>Event</th><th>Period</th><th>Clock</th><th>Scoring Chance</th><th>Penalty Drawn</th><th>Led To Goal</th><th></th></tr></thead>
+      <tbody id="manualBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <details>
+    <summary style="cursor:pointer;color:var(--team-color)">Hotkeys and rules (click to expand)</summary>
+    <div class="small" style="line-height:1.6;margin-top:8px">
+      <b>Zone entry:</b> <b>I</b> Carry-in — record only when Anaheim carries the puck across the offensive blue line. The route that created the opportunity (transition, stretch pass, regroup, etc.) is not the zone entry itself.<br>
+      <b>Separate manual events:</b> <b>3</b> DZ → OZ Transition Completed · <b>4</b> Stretch Pass → OZ Possession<br>
+      <b>Events:</b> <b>1</b> DZ Blueline Play Shut Down · <b>2</b> D-Man Aggressive Gap Close · <b>=</b> OZ Turnover Forced · <b>A</b> Activated D-Man (OZ) · <b>L</b> Lost Possession<br>
+      <b>Mark the last event you logged:</b> <b>S</b> scoring chance · <b>P</b> penalty drawn · <b>G</b> led to goal · <b>Backspace</b> undo<br>
+      <b>With a shot selected:</b> <b>C</b> scoring chance · <b>8</b> 2nd chance · <b>9</b> 3rd+ chance · <b>0</b> traffic · <b>-</b> low-value · <b>↑ ↓</b> previous / next shot · <b>Esc</b> deselect<br>
+      <hr style="border-color:#333">
+      <b>Shot timing</b> is measured from the most recent Carry-in (I): Rush under 5s · Early 5–10s · Sustained over 10–30s · Extended over 30s.<br>
+      Carry-in timing ends when Anaheim loses possession, the opponent shoots, a goal/stoppage/faceoff/period end occurs, or you log <b>L</b>, <b>=</b> or <b>1</b>. A takeaway or giveaway that gives Anaheim possession starts a new possession, but does not count as a carry-in.<br>
+      A shot with no usable entry is <b>Unclassified</b>. Shots after the first one in the same possession are <b>Follow-up</b> shots and are not timed.<br>
+      Click a shot row and read the grey text under "3. Shots" to see exactly why it was classified that way.
+    </div>
+  </details>
+</div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const DEFAULT_TEAM = "ANA";          // team selected when the tracker opens
+const TEAM_COLORS = { ANA:"#F47A1F", DAL:"#006847", NYI:"#00539B", SJS:"#006D75", TOR:"#00205B", DET:"#CE1126" };
+const ENTRY_KEYS = { "i": "Carry-in" };
+const ENTRY_TYPE = { "Carry-in": "Controlled carry across offensive blue line" };
+const EVENT_KEYS = {
+  "3": "DZ → OZ Transition Completed",
+  "4": "Stretch Pass → OZ Possession",
+  "1": "DZ Blueline Play Shut Down",
+  "2": "D-Man Aggressive Gap Close",
+  "=": "OZ Turnover Forced",
+  "a": "Activated D-Man (OZ)",
+  "l": "Lost Possession"
+};
+const SHOT_RESULT = { "goal":"Goal", "shot-on-goal":"Save", "missed-shot":"Miss", "blocked-shot":"Blocked" };
+const RESET_TYPES = new Set(["faceoff","stoppage","period-start","period-end","game-end"]);
+// CSV event names for each classification (same wording as the old tracker)
+const CLASS_EVENT = {
+  Rush: "Rush Shot (<5s After Zone Entry)",
+  Early: "Early Possession Shot (<10s)",
+  Sustained: "Sustained Possession Shot (10–30s)",
+  Extended: "Extended Possession Shot (>30s)",
+  "Follow-up": "Follow-up Shot (Same Possession)",
+  Unclassified: "Unclassified Shot",
+  Opponent: "Opponent Shot"
+};
+const CLASS_LABEL = {
+  Rush: "Rush (<5s)", Early: "Early (5–10s)", Sustained: "Sustained (10–30s)", Extended: "Extended (>30s)",
+  "Follow-up": "Follow-up (same possession)", Unclassified: "Unclassified", Opponent: "— (other team)"
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let tracking = false;
+let game = null;          // { id, date, home, away, gameType, homeName, awayName }
+let official = [];        // normalized NHL events
+let entries = [];         // your zone entries
+let manual = [];          // your other events
+let tags = {};            // NHL eventId -> { chance, second, third, traffic, low }
+let history = [];         // for undo: [{kind:'entry'|'manual', uid}]
+let nextUid = 1;
+let selectedId = null;    // NHL eventId of the selected shot
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ============================================================
+// BASIC HELPERS
+// ============================================================
+function localDateString(d) {
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function parseClock(s) {
+  const m = String(s ?? "").match(/^(\d{1,2}):(\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+function fmtClock(sec) {
+  if (sec === null || sec === undefined) return "";
+  sec = Math.max(0, sec);
+  return String(Math.floor(sec/60)).padStart(2,"0") + ":" + String(sec % 60).padStart(2,"0");
+}
+function periodLabel(pd) {
+  if (!pd) return "";
+  if (pd.periodType === "SO") return "SO";
+  if (pd.periodType === "OT") return pd.number <= 4 ? "OT" : (pd.number - 3) + "OT";
+  return String(pd.number ?? "");
+}
+function periodNum(label) {
+  if (label === "OT") return 4;
+  const ot = /^(\d)OT$/.exec(label);
+  if (ot) return Number(ot[1]) + 3;
+  if (label === "SO") return 99;
+  const n = parseInt(label, 10);
+  return isNaN(n) ? 0 : n;
+}
+function periodLen(pn) {
+  if (pn <= 3) return 1200;
+  return (game && game.gameType === 3) ? 1200 : 300;   // playoff OT is 20 minutes
+}
+function tkey(pn, elapsed) { return pn * 100000 + (elapsed ?? 0); }
+function teamColor(abbrev) { return TEAM_COLORS[abbrev] || "#4CAF50"; }
+
+function setMsg(text, kind) {
+  const m = $("msg");
+  m.textContent = text || "";
+  m.className = "small" + (kind ? " " + kind : "");
+}
+function setStatus(text) { $("status").textContent = text; }
+
+// ============================================================
+// STARTUP
+// ============================================================
+(function init() {
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  $("gameDate").value = localDateString(y);
+  document.documentElement.style.setProperty("--team-color", teamColor(DEFAULT_TEAM));
+  $("gameClock").addEventListener("input", e => {
+    let v = e.target.value.replace(/\D/g, "");
+    if (v.length >= 3) v = v.slice(0,2) + ":" + v.slice(2,4);
+    e.target.value = v.slice(0,5);
+  });
+  // Enter in the clock box drops focus so the next key press is a hotkey
+  $("gameClock").addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
+  // Selecting a dropdown value drops focus so hotkey digits can never change it
+  ["team","period","gameSelect"].forEach(id => $(id).addEventListener("change", e => e.target.blur()));
+
+  if (location.protocol === "file:") {
+    const w = $("fileWarning");
+    w.style.display = "block";
+    w.innerHTML = "<b>You opened this file directly (file://).</b> Loading games will not work this way. " +
+      "Start the server (<code>nhl_api_server.py</code>) and open <b>http://localhost:8000/</b> instead.";
+  }
+})();
+
+// ============================================================
+// API
+// ============================================================
+async function api(path) {
+  let r;
+  try { r = await fetch(path); }
+  catch (e) { throw new Error("Cannot reach the local server. Is nhl_api_server.py running? (" + e.message + ")"); }
+  let data = null;
+  try { data = await r.json(); } catch (e) { /* not JSON */ }
+  if (!r.ok || !data || data.error) throw new Error((data && data.error) || ("Request failed (" + r.status + ")"));
+  return data;
+}
+function teamLabel(t) {
+  if (!t) return "?";
+  return (t.name && t.name.default) || ((t.placeName && t.placeName.default) ? (t.placeName.default + " " + ((t.commonName && t.commonName.default) || "")).trim() : "") || t.abbrev || "?";
+}
+function gameLabel(g) {
+  const a = g.awayTeam || {}, h = g.homeTeam || {};
+  const score = (a.score !== undefined && h.score !== undefined) ? ` (${a.score}-${h.score})` : "";
+  return `${a.abbrev || "AWY"} @ ${h.abbrev || "HME"}${score} — ${g.gameState || g.gameScheduleState || ""}`;
+}
+
+async function loadGames() {
+  $("loadBtn").disabled = true;
+  setStatus("Loading games…");
+  $("gameSelect").innerHTML = ""; $("importBtn").disabled = true;
+  try {
+    const date = $("gameDate").value;
+    if (!date) throw new Error("Choose a date first.");
+    const data = await api("/api/score/" + date);
+    const games = Array.isArray(data.games) ? data.games : [];
+    if (!games.length) {
+      $("gameSelect").innerHTML = '<option value="">No games found</option>';
+      setStatus("The NHL returned no games for " + date + ".");
+      return;
+    }
+    const done = g => ["FINAL","OFF"].includes(g.gameState);
+    let pick = games.find(g => (g.awayTeam && g.awayTeam.abbrev === DEFAULT_TEAM) || (g.homeTeam && g.homeTeam.abbrev === DEFAULT_TEAM));
+    if (!pick) pick = games.find(done) || games[0];
+    $("gameSelect").innerHTML = '<option value="">Select a game…</option>' +
+      games.map(g => `<option value="${esc(g.id)}">${esc(gameLabel(g))}</option>`).join("");
+    $("gameSelect").value = String(pick.id);
+    $("importBtn").disabled = false;
+    const nDone = games.filter(done).length;
+    setStatus(`${games.length} game(s) on ${date} (${nDone} completed). ${pick === games.find(g => g.id === pick.id) && ((pick.awayTeam && pick.awayTeam.abbrev === DEFAULT_TEAM) || (pick.homeTeam && pick.homeTeam.abbrev === DEFAULT_TEAM)) ? DEFAULT_TEAM + " game pre-selected. " : ""}Press Import Game.`);
+    // remember the day's games for the import step
+    window._dayGames = games;
+  } catch (e) {
+    setStatus("Could not load games: " + e.message);
+  } finally {
+    $("loadBtn").disabled = false;
+  }
+}
+
+// ============================================================
+// IMPORT + NORMALIZE
+// ============================================================
+function normalizePlays(data) {
+  const home = data.homeTeam || {}, away = data.awayTeam || {};
+  const abbrevById = new Map([[Number(home.id), home.abbrev], [Number(away.id), away.abbrev]]);
+  const roster = new Map((data.rosterSpots || []).map(r => [Number(r.playerId), r]));
+  const nameOf = id => {
+    if (!id) return "";
+    const r = roster.get(Number(id));
+    if (!r) return "#" + id;
+    return (((r.firstName && r.firstName.default) || "") + " " + ((r.lastName && r.lastName.default) || "")).trim() || ("#" + id);
+  };
+  const teamOfPlayer = id => {
+    const r = id ? roster.get(Number(id)) : null;
+    return r ? abbrevById.get(Number(r.teamId)) : undefined;
+  };
+  const strength = (code, isHome) => {
+    const s = String(code ?? "");
+    if (!/^\d{4}$/.test(s)) return { label: "?", is5v5: false };
+    const awayG = +s[0], awaySk = +s[1], homeSk = +s[2], homeG = +s[3];
+    const forSk = isHome ? homeSk : awaySk, agSk = isHome ? awaySk : homeSk;
+    const forG = isHome ? homeG : awayG, agG = isHome ? awayG : homeG;
+    let label = forSk + "v" + agSk;
+    if (!forG) label += " (own EN)";
+    if (!agG) label += " (opp EN)";
+    return { label, is5v5: forSk === 5 && agSk === 5 && forG === 1 && agG === 1 };
+  };
+
+  const out = [];
+  (data.plays || []).forEach((p, i) => {
+    const t = p.typeDescKey || "", d = p.details || {}, pd = p.periodDescriptor || {};
+    const pn = pd.number || 0;
+    const elapsed = parseClock(p.timeInPeriod);
+    const remaining = p.timeRemaining || (elapsed !== null ? fmtClock(periodLen(pn) - elapsed) : "");
+    const base = {
+      apiId: p.eventId ?? ("i" + i), sort: p.sortOrder ?? i, type: t, pn, period: periodLabel(pd),
+      elapsed, clock: remaining, x: d.xCoord, y: d.yCoord, zone: d.zoneCode || ""
+    };
+
+    if (SHOT_RESULT[t]) {
+      const shooterId = t === "goal" ? d.scoringPlayerId : d.shootingPlayerId;
+      // The shooter's team comes from the roster; for blocked shots eventOwnerTeamId may be the blocking team
+      const team = teamOfPlayer(shooterId) || abbrevById.get(Number(d.eventOwnerTeamId)) || "";
+      const st = strength(p.situationCode, team === home.abbrev);
+      out.push(Object.assign(base, {
+        kind: "shot", team, shooter: nameOf(shooterId), shotType: d.shotType || "",
+        result: SHOT_RESULT[t], strength: st.label, is5v5: st.is5v5,
+        cls: "", why: "", sec: null, secStart: null
+      }));
+    } else if (t === "takeaway" || t === "giveaway") {
+      out.push(Object.assign(base, {
+        kind: t, team: teamOfPlayer(d.playerId) || abbrevById.get(Number(d.eventOwnerTeamId)) || "", player: nameOf(d.playerId)
+      }));
+    } else if (t === "penalty") {
+      const ownerTeam = abbrevById.get(Number(d.eventOwnerTeamId)) || "";
+      const drawTeam = teamOfPlayer(d.drawnByPlayerId) ||
+        (ownerTeam ? (ownerTeam === home.abbrev ? away.abbrev : home.abbrev) : "");
+      const note = [d.descKey, d.duration ? d.duration + " min" : "",
+        d.committedByPlayerId ? "committed by " + nameOf(d.committedByPlayerId) : "",
+        d.drawnByPlayerId ? "drawn by " + nameOf(d.drawnByPlayerId) : ""].filter(Boolean).join(", ");
+      out.push(Object.assign(base, { kind: "penalty", team: drawTeam, note }));
+    } else if (RESET_TYPES.has(t)) {
+      out.push(Object.assign(base, { kind: "reset" }));
+    }
+    // hits, delayed penalties and other event types are not needed
+  });
+  out.sort((a, b) => a.sort - b.sort);
+  return out;
+}
+
+async function importGame() {
+  const id = $("gameSelect").value;
+  if (!id) { setStatus("Select a game first."); return; }
+  $("importBtn").disabled = true;
+  setStatus("Importing NHL play-by-play…");
+  try {
+    const data = await api("/api/game/" + id + "/play-by-play");
+    if (!Array.isArray(data.plays) || !data.plays.length) throw new Error("The NHL returned no play-by-play events for this game.");
+    const home = data.homeTeam || {}, away = data.awayTeam || {};
+    if (!home.abbrev || !away.abbrev) throw new Error("The NHL response has no team information.");
+
+    game = {
+      id: String(id), date: data.gameDate || $("gameDate").value, gameType: data.gameType || 2,
+      home: home.abbrev, away: away.abbrev, homeName: teamLabel(home), awayName: teamLabel(away),
+      homeScore: home.score, awayScore: away.score
+    };
+    official = normalizePlays(data);
+
+    // reset per-game state, then restore a saved session for this game if there is one
+    entries = []; manual = []; tags = {}; history = []; nextUid = 1; selectedId = null;
+
+    // team dropdown: the two teams in this game, Ducks first if they are playing
+    const sel = $("team");
+    sel.innerHTML = "";
+    [away, home].forEach(t => {
+      const o = document.createElement("option");
+      o.value = t.abbrev; o.textContent = teamLabel(t) + " (" + t.abbrev + ")";
+      sel.appendChild(o);
+    });
+    sel.value = [home.abbrev, away.abbrev].includes(DEFAULT_TEAM) ? DEFAULT_TEAM : home.abbrev;
+
+    const restored = loadSession();
+    applyTeam();
+
+    // data check line: what the NHL actually sent
+    const shots = official.filter(e => e.kind === "shot");
+    const count = k => official.filter(e => e.kind === k).length;
+    const byResult = r => shots.filter(s => s.result === r).length;
+    const warn = [];
+    if (!(data.rosterSpots || []).length) warn.push("no roster data (shooters show as player IDs)");
+    if (!shots.length) warn.push("no shot events found");
+    setStatus(`Imported ${data.plays.length} NHL plays → ${shots.length} shot attempts ` +
+      `(${byResult("Goal")} goals, ${byResult("Save")} saves, ${byResult("Miss")} misses, ${byResult("Blocked")} blocked), ` +
+      `${count("takeaway")} takeaways, ${count("giveaway")} giveaways, ${count("penalty")} penalties.` +
+      (restored ? " " + restored : "") + (warn.length ? " ⚠ " + warn.join("; ") + "." : ""));
+    $("gameInfo").textContent = `${game.awayName} ${game.awayScore ?? ""} @ ${game.homeName} ${game.homeScore ?? ""}  |  Game ID ${game.id}  |  ${game.date}`;
+    $("opponent").value = analyzedOpponent();
+    renderAll();
+  } catch (e) {
+    setStatus("Import failed: " + e.message);
+  } finally {
+    $("importBtn").disabled = false;
+  }
+}
+
+function analyzedTeam() { return $("team").value; }
+function analyzedOpponent() {
+  if (!game) return "";
+  return analyzedTeam() === game.home ? game.away : game.home;
+}
+function applyTeam() {
+  document.documentElement.style.setProperty("--team-color", teamColor(analyzedTeam()));
+  $("opponent").value = analyzedOpponent();
+}
+function onTeamChange() {
+  applyTeam(); reclassify(); renderAll(); saveSession();
+}
+
+// ============================================================
+// CLASSIFICATION (shot timing from your zone entries)
+// ============================================================
+function timingClass(d) {
+  if (d < 5) return "Rush";
+  if (d <= 10) return "Early";
+  if (d <= 30) return "Sustained";
+  return "Extended";
+}
+
+function reclassify() {
+  if (!game) return;
+  const team = analyzedTeam();
+  const items = [];
+  official.forEach(e => {
+    if (e.kind === "shot") {
+      items.push({ k: tkey(e.pn, e.elapsed), prio: 1, ord: e.sort, src: "api", e });
+    } else if (e.elapsed !== null && (e.kind === "takeaway" || e.kind === "giveaway" || e.kind === "reset")) {
+      items.push({ k: tkey(e.pn, e.elapsed), prio: -1, ord: e.sort, src: "api", e });
+    }
+  });
+  entries.filter(x => x.team === team).forEach(x => items.push({ k: x.key, prio: 0, ord: x.uid, src: "entry", e: x }));
+  manual.filter(x => x.team === team).forEach(x => {
+    const starts = x.event === "OZ Turnover Forced" || x.event === "DZ Blueline Play Shut Down";
+    items.push({ k: x.key, prio: x.event === "Lost Possession" ? 2 : (starts ? 0 : 3), ord: x.uid, src: "manual", e: x });
+  });
+  items.sort((a, b) => a.k - b.k || a.prio - b.prio || a.ord - b.ord);
+
+  let poss = null;
+  let lastReset = "none yet";
+  const reset = why => { poss = null; lastReset = why; };
+
+  for (const it of items) {
+    const e = it.e;
+    if (it.src === "api") {
+      if (e.kind === "shot") {
+        if (e.team !== team) {
+          e.cls = "Opponent"; e.sec = null; e.secStart = null;
+          e.why = "Shot by the other team; not classified.";
+          reset("opponent shot at " + e.period + " " + e.clock);
+          continue;
+        }
+        classifyOwnShot(e, poss, lastReset);
+        if (poss) poss.used = true;
+        if (e.result === "Goal") reset("goal at " + e.period + " " + e.clock);
+      } else if (e.kind === "takeaway" || e.kind === "giveaway") {
+        if (e.team !== team && e.team !== analyzedOpponent()) continue;
+        const turnoverByAnalyzedTeam = e.team === team;
+        const ducksGainPossession = (e.kind === "takeaway" && turnoverByAnalyzedTeam) ||
+                                    (e.kind === "giveaway" && !turnoverByAnalyzedTeam);
+        const label = e.kind + " by " + e.team + " at " + e.period + " " + e.clock;
+        if (ducksGainPossession) {
+          poss = { pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: label,
+                   entry: null, entryClock: "", entryType: "", used: false };
+          lastReset = label + " (Anaheim possession begins; awaiting carry-in)";
+        } else {
+          reset(label + " (Anaheim possession ends)");
+        }
+      } else {
+        reset(e.type.replace("-", " ") + " at " + e.period + " " + e.clock);
+      }
+    } else if (it.src === "entry") {
+      if (poss && poss.pn === e.pn && poss.entry === null && !poss.used) {
+        poss.entry = e.elapsed; poss.entryClock = e.clock; poss.entryType = e.entryType;
+      } else {
+        poss = { pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
+                 entry: e.elapsed, entryClock: e.clock, entryType: e.entryType, used: false };
+      }
+    } else {
+      if (e.event === "OZ Turnover Forced" || e.event === "DZ Blueline Play Shut Down") {
+        poss = { pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
+                 entry: null, entryClock: "", entryType: "", used: false };
+      } else if (e.event === "Lost Possession") {
+        reset("Lost Possession (your L) at " + e.period + " " + e.clock);
+      }
+    }
+  }
+  // shots with no time at all were skipped in the loop above
+  official.forEach(e => {
+    if (e.kind === "shot" && !e.cls) { e.cls = e.team === team ? "Unclassified" : "Opponent"; e.why = "The NHL did not provide a time for this shot."; }
+  });
+}
+
+function classifyOwnShot(e, poss, lastReset) {
+  e.sec = null; e.secStart = null;
+  if (e.elapsed === null) { e.cls = "Unclassified"; e.why = "The NHL did not provide a time for this shot."; return; }
+  if (poss && poss.pn !== e.pn) poss = null;
+  if (!poss) {
+    e.cls = "Unclassified";
+    e.why = "No possession recorded before this shot. Last reset: " + lastReset + ".";
+  } else if (poss.used) {
+    e.cls = "Follow-up";
+    e.sec = poss.entry !== null ? e.elapsed - poss.entry : null;
+    e.why = "An earlier shot was already taken in this possession (started by " + poss.startType + " at " + poss.startClock +
+      (poss.entry !== null ? ", entry at " + poss.entryClock : "") + "). Follow-up shots are not timed.";
+  } else if (poss.entry === null) {
+    e.cls = "Unclassified";
+    e.secStart = e.elapsed - poss.startElapsed;
+    e.why = "Possession started with " + poss.startType + " at " + poss.startClock + ", but no zone entry was recorded (" + e.secStart + "s after that start).";
+  } else {
+    const d = e.elapsed - poss.entry;
+    if (d < 0) {
+      e.cls = "Unclassified";
+      e.why = "This shot is " + (-d) + "s BEFORE the entry you recorded at " + poss.entryClock + ". Check the clock times.";
+    } else {
+      e.cls = timingClass(d); e.sec = d;
+      e.why = poss.entryType + " at " + poss.entryClock + " → shot at " + e.clock + " = " + d + "s after the entry → " + CLASS_LABEL[e.cls] + ".";
+    }
+  }
+}
+
+// ============================================================
+// TAGS
+// ============================================================
+function tagsFor(id) {
+  if (!tags[id]) tags[id] = { chance: false, second: false, third: false, traffic: false, low: false };
+  return tags[id];
+}
+function selectedShot() { return official.find(e => e.kind === "shot" && e.apiId === selectedId) || null; }
+
+function toggleTag(name) {
+  const s = selectedShot();
+  if (!s) { setMsg("Select a shot in the table first.", "err"); renderDetail(); return; }
+  const t = tagsFor(s.apiId);
+  if (name === "second")      { t.second = !t.second; if (t.second) { t.third = false; t.chance = true; } }
+  else if (name === "third")  { t.third = !t.third;   if (t.third) { t.second = false; t.chance = true; } }
+  else if (name === "chance") { t.chance = !t.chance; if (!t.chance) { t.second = false; t.third = false; } }
+  else                        { t[name] = !t[name]; }
+  saveSession(); renderShots(); renderDetail();
+}
+
+// ============================================================
+// MANUAL LOGGING
+// ============================================================
+function readClockInput() {
+  if (!game) { setMsg("Import a game first.", "err"); return null; }
+  const v = $("gameClock").value.trim();
+  const m = v.match(/^(\d{1,2}):(\d{2})$/);
+  const period = $("period").value, pn = periodNum(period);
+  if (!m || Number(m[2]) > 59) { setMsg("Enter the game clock as MM:SS (for example 12:34).", "err"); return null; }
+  const remaining = Number(m[1]) * 60 + Number(m[2]);
+  if (remaining > periodLen(pn)) { setMsg("That clock is longer than the period.", "err"); return null; }
+  return { period, pn, clock: fmtClock(remaining), elapsed: periodLen(pn) - remaining };
+}
+
+function logEntry() {
+  const c = readClockInput(); if (!c) return;
+  const eventName = "Carry-in";
+  const x = { uid: nextUid++, team: analyzedTeam(), event: eventName, entryType: ENTRY_TYPE[eventName],
+              period: c.period, pn: c.pn, clock: c.clock, elapsed: c.elapsed, key: tkey(c.pn, c.elapsed) };
+  entries.push(x); history.push({ kind: "entry", uid: x.uid });
+  setMsg("Logged: " + eventName + " — " + c.period + " " + c.clock, "ok");
+  afterChange();
+}
+function logManual(eventName) {
+  const c = readClockInput(); if (!c) return;
+  const x = { uid: nextUid++, team: analyzedTeam(), event: eventName, period: c.period, pn: c.pn, clock: c.clock,
+              elapsed: c.elapsed, key: tkey(c.pn, c.elapsed), chance: "NO", penalty: "NO", goal: "NO" };
+  manual.push(x); history.push({ kind: "manual", uid: x.uid });
+  setMsg("Logged: " + eventName + " — " + c.period + " " + c.clock, "ok");
+  afterChange();
+}
+function markLast(type) {
+  const last = [...history].reverse().find(h => h.kind === "manual");
+  if (!last) { setMsg("Log one of your events first (S / P / G mark the last event you logged).", "err"); return; }
+  const x = manual.find(m => m.uid === last.uid);
+  if (!x) return;
+  x[type] = "YES";
+  setMsg("Marked '" + x.event + "' (" + x.period + " " + x.clock + ") as " +
+    ({ chance: "Scoring Chance", penalty: "Penalty Drawn", goal: "Led To Goal" })[type] + ".", "ok");
+  afterChange();
+}
+function undoLast() {
+  const h = history.pop();
+  if (!h) { setMsg("Nothing to undo.", "err"); return; }
+  if (h.kind === "entry") entries = entries.filter(x => x.uid !== h.uid);
+  else manual = manual.filter(x => x.uid !== h.uid);
+  setMsg("Removed the last logged item.", "ok");
+  afterChange();
+}
+function deleteItem(kind, uid) {
+  if (kind === "entry") entries = entries.filter(x => x.uid !== uid);
+  else manual = manual.filter(x => x.uid !== uid);
+  history = history.filter(h => !(h.kind === kind && h.uid === uid));
+  afterChange();
+}
+function editItem(kind, uid) {
+  const list = kind === "entry" ? entries : manual;
+  const x = list.find(i => i.uid === uid); if (!x) return;
+  const period = prompt("Period (1, 2, 3 or OT):", x.period); if (period === null) return;
+  const clock = prompt("Game clock (MM:SS):", x.clock); if (clock === null) return;
+  const pn = periodNum(period.trim().toUpperCase());
+  const m = clock.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!pn || !m || Number(m[2]) > 59 || Number(m[1]) * 60 + Number(m[2]) > periodLen(pn)) { setMsg("That period or clock is not valid; nothing changed.", "err"); return; }
+  const remaining = Number(m[1]) * 60 + Number(m[2]);
+  x.period = period.trim().toUpperCase(); x.pn = pn; x.clock = fmtClock(remaining);
+  x.elapsed = periodLen(pn) - remaining; x.key = tkey(pn, x.elapsed);
+  afterChange();
+}
+function afterChange() { reclassify(); saveSession(); renderAll(); }
+
+// ============================================================
+// SESSION (auto-saved in this browser, per game)
+// ============================================================
+function sessionKey() { return "hu_session_v5_" + game.id; }
+function saveSession() {
+  if (!game) return;
+  try {
+    localStorage.setItem(sessionKey(), JSON.stringify({ entries, manual, tags, history, nextUid, team: analyzedTeam() }));
+    $("saved").textContent = "Auto-saved " + new Date().toLocaleTimeString();
+  } catch (e) { $("saved").textContent = "Could not auto-save (" + e.message + ")"; }
+}
+function loadSession() {
+  try {
+    let raw = localStorage.getItem(sessionKey());
+    let migrated = false;
+    if (!raw) {
+      raw = localStorage.getItem("hu_session_v4_" + game.id);
+      migrated = !!raw;
+    }
+    if (!raw) return "";
+    const s = JSON.parse(raw);
+    entries = s.entries || []; manual = s.manual || []; tags = s.tags || {}; history = s.history || []; nextUid = s.nextUid || 1;
+    if (migrated) {
+      const moved = new Set();
+      const kept = [];
+      entries.forEach(x => {
+        if (x.event === "DZ → OZ Transition Completed" || x.event === "Stretch Pass → OZ Possession") {
+          manual.push({ ...x, chance: x.chance || "NO", penalty: x.penalty || "NO", goal: x.goal || "NO" });
+          moved.add(x.uid);
+        } else if (x.event === "Carry-in") {
+          kept.push(x);
+        }
+        // Legacy "Zone Entry (Other)" is deliberately not re-labelled as a carry-in.
+      });
+      entries = kept;
+      history.forEach(h => { if (h.kind === "entry" && moved.has(h.uid)) h.kind = "manual"; });
+      history = history.filter(h => h.kind !== "entry" || entries.some(x => x.uid === h.uid));
+      localStorage.setItem(sessionKey(), JSON.stringify({ entries, manual, tags, history, nextUid, team: s.team }));
+    }
+    if (s.team && [...$("team").options].some(o => o.value === s.team)) $("team").value = s.team;
+    return `${migrated ? "Migrated older saved session. " : ""}Restored your saved session (${entries.length} carry-ins, ${manual.length} events, ${Object.keys(tags).length} tagged shots).`;
+  } catch (e) { return ""; }
+}
+function clearSession() {
+  if (!game) return;
+  if (!confirm("Delete your entries, events and shot tags for this game?")) return;
+  try { localStorage.removeItem(sessionKey()); } catch (e) {}
+  entries = []; manual = []; tags = {}; history = []; nextUid = 1; selectedId = null;
+  reclassify(); renderAll(); setMsg("Saved session cleared.", "ok");
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function allShots() {
+  return official.filter(e => e.kind === "shot").sort((a, b) => tkey(a.pn, a.elapsed) - tkey(b.pn, b.elapsed) || a.sort - b.sort);
+}
+function visibleShots() {
+  const team = analyzedTeam();
+  return allShots().filter(s => (!$("fOwn").checked || s.team === team) && (!$("f5v5").checked || s.is5v5));
+}
+function tagBadges(id) {
+  const t = tags[id]; if (!t) return "";
+  let h = "";
+  if (t.chance) h += '<span class="tag">Chance</span>';
+  if (t.second) h += '<span class="tag sec">2nd</span>';
+  if (t.third) h += '<span class="tag sec">3rd+</span>';
+  if (t.traffic) h += '<span class="tag">Traffic</span>';
+  if (t.low) h += '<span class="tag">Low-value</span>';
+  return h;
+}
+function renderShots() {
+  const list = visibleShots(), total = allShots().length, team = analyzedTeam();
+  const body = $("shotBody");
+  body.innerHTML = "";
+  list.forEach((s, i) => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = s.apiId;
+    if (s.team !== team) tr.classList.add("opp");
+    if (s.result === "Goal") tr.classList.add("goal");
+    if (s.apiId === selectedId) tr.classList.add("sel");
+    tr.onclick = () => selectShot(s.apiId);
+    const clsClass = s.cls === "Unclassified" ? "cls-unclassified" : (s.cls === "Follow-up" ? "cls-followup" : "");
+    tr.innerHTML =
+      `<td>${s.apiId === selectedId ? "►" : ""}</td><td class="num">${i + 1}</td><td>${esc(s.team)}</td><td>${esc(s.period)}</td>` +
+      `<td>${esc(s.clock)}</td><td>${esc(s.shooter)}</td><td>${esc(s.shotType)}</td><td>${esc(s.result)}</td>` +
+      `<td>${esc(s.strength)}</td><td class="${clsClass}">${esc(CLASS_LABEL[s.cls] || s.cls)}</td>` +
+      `<td class="num">${s.sec !== null && s.sec !== undefined ? s.sec : ""}</td><td>${tagBadges(s.apiId)}</td><td>${esc(s.apiId)}</td>`;
+    body.appendChild(tr);
+  });
+  $("shotCount").textContent = game ? `— showing ${list.length} of ${total} shot attempts` : "";
+}
+function renderDetail() {
+  const s = selectedShot();
+  const box = $("detail");
+  if (!s) {
+    box.classList.remove("active");
+    $("detailText").textContent = game ? "No shot selected. Click a row in the table below." : "Import a game to see its shots.";
+    $("tagRow").style.display = "none";
+    return;
+  }
+  box.classList.add("active");
+  $("detailText").innerHTML =
+    `<b style="color:#ffd54f">Selected shot:</b> ${esc(s.team)} · ${esc(s.period)} ${esc(s.clock)} · ${esc(s.shooter || "unknown shooter")} · ` +
+    `${esc(s.shotType || "shot type n/a")} · ${esc(s.result)} · ${esc(s.strength)}` +
+    (s.x !== undefined ? ` · location (${esc(s.x)}, ${esc(s.y)})` : "") +
+    `<br><b>Classification:</b> ${esc(CLASS_LABEL[s.cls] || s.cls)}<br>` +
+    `<span class="small">Why: ${esc(s.why)}${s.secStart !== null && s.secStart !== undefined ? "" : ""}</span>`;
+  const t = tagsFor(s.apiId);
+  $("tChance").checked = t.chance; $("tSecond").checked = t.second; $("tThird").checked = t.third;
+  $("tTraffic").checked = t.traffic; $("tLow").checked = t.low;
+  $("tagRow").style.display = "block";
+}
+function selectShot(id) {
+  selectedId = (selectedId === id) ? null : id;
+  renderShots(); renderDetail();
+}
+function renderEntries() {
+  const body = $("entryBody"); body.innerHTML = "";
+  [...entries].sort((a, b) => a.key - b.key).forEach(x => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(x.team)}</td><td>${esc(x.event)} <span class="small">(${esc(x.entryType)})</span></td><td>${esc(x.period)}</td><td>${esc(x.clock)}</td>` +
+      `<td><button onclick="editItem('entry',${x.uid})">Edit</button> <button onclick="deleteItem('entry',${x.uid})">Delete</button></td>`;
+    body.appendChild(tr);
+  });
+  $("entryCount").textContent = `— ${entries.length} logged`;
+}
+function renderManual() {
+  const body = $("manualBody"); body.innerHTML = "";
+  [...manual].sort((a, b) => a.key - b.key).forEach(x => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(x.team)}</td><td>${esc(x.event)}</td><td>${esc(x.period)}</td><td>${esc(x.clock)}</td>` +
+      `<td>${x.chance}</td><td>${x.penalty}</td><td>${x.goal}</td>` +
+      `<td><button onclick="editItem('manual',${x.uid})">Edit</button> <button onclick="deleteItem('manual',${x.uid})">Delete</button></td>`;
+    body.appendChild(tr);
+  });
+  $("manualCount").textContent = `— ${manual.length} logged`;
+}
+function renderAll() { renderShots(); renderDetail(); renderEntries(); renderManual(); }
+
+// ============================================================
+// HOTKEYS
+// ============================================================
+function toggleTracking() {
+  tracking = !tracking;
+  $("trackBtn").textContent = tracking ? "Stop Hotkeys" : "Start Tracking (enable hotkeys)";
+  $("trackPill").textContent = tracking ? "Hotkeys ON" : "Hotkeys OFF";
+  $("trackPill").className = "pill" + (tracking ? " on" : "");
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+}
+document.addEventListener("keydown", e => {
+  if (!tracking) return;
+  const tag = document.activeElement ? document.activeElement.tagName : "";
+  if (tag === "INPUT" && document.activeElement.type !== "checkbox") return;
+  if (tag === "SELECT") document.activeElement.blur();
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  const key = e.key.toLowerCase();
+
+  if (e.key === "Escape") { if (selectedId !== null) { selectedId = null; renderShots(); renderDetail(); } return; }
+  if (e.key === "Backspace") { e.preventDefault(); undoLast(); return; }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const list = visibleShots(); if (!list.length) return;
+    e.preventDefault();
+    let i = list.findIndex(s => s.apiId === selectedId);
+    i = e.key === "ArrowDown" ? Math.min(list.length - 1, i + 1) : Math.max(0, i === -1 ? 0 : i - 1);
+    selectedId = list[i].apiId; renderShots(); renderDetail();
+    const row = document.querySelector('#shotBody tr[data-id="' + CSS.escape(String(selectedId)) + '"]');
+    if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  // shot tags (apply to the selected shot)
+  if (key === "c") { e.preventDefault(); toggleTag("chance"); return; }
+  if (key === "8") { e.preventDefault(); toggleTag("second"); return; }
+  if (key === "9") { e.preventDefault(); toggleTag("third"); return; }
+  if (key === "0") { e.preventDefault(); toggleTag("traffic"); return; }
+  if (key === "-") { e.preventDefault(); toggleTag("low"); return; }
+  // entries and events
+  if (ENTRY_KEYS[key]) { e.preventDefault(); logEntry(); return; }
+  if (EVENT_KEYS[key]) { e.preventDefault(); logManual(EVENT_KEYS[key]); return; }
+  // mark last logged event
+  if (key === "s") { e.preventDefault(); markLast("chance"); return; }
+  if (key === "p") { e.preventDefault(); markLast("penalty"); return; }
+  if (key === "g") { e.preventDefault(); markLast("goal"); return; }
+});
+
+// ============================================================
+// EXPORT
+// ============================================================
+const CSV_COLS = ["Team","Game_Clock","Period","Event","Is_Scoring_Chance","Penalty_Drawn","Led_To_Goal","Shot_Result",
+  "Source","Game_ID","Game_Date","Home_Team","Away_Team","Event_Type","Event_ID","Shooter","Shot_Type","Strength",
+  "Possession_Class","Entry_Type","Seconds_Since_Entry","Seconds_Since_Possession_Start",
+  "Second_Chance","Third_Plus_Chance","Traffic","Low_Value","Zone","X","Y","Elapsed_Seconds","Notes"];
+
+function csvCell(v) { return '"' + String(v ?? "").replace(/"/g, '""') + '"'; }
+
+function buildRows() {
+  const rows = [];
+  const common = { Game_ID: game.id, Game_Date: game.date, Home_Team: game.home, Away_Team: game.away };
+  const yn = b => b ? "YES" : "NO";
+
+  official.forEach(e => {
+    if (e.kind === "shot") {
+      const t = tags[e.apiId] || {};
+      rows.push({ key: tkey(e.pn, e.elapsed), prio: 1, ord: e.sort, r: Object.assign({}, common, {
+        Team: e.team, Game_Clock: e.clock, Period: e.period, Event: CLASS_EVENT[e.cls] || e.cls,
+        Is_Scoring_Chance: yn(t.chance), Penalty_Drawn: "NO", Led_To_Goal: yn(e.result === "Goal"), Shot_Result: e.result,
+        Source: "NHL API", Event_Type: "Shot", Event_ID: e.apiId, Shooter: e.shooter, Shot_Type: e.shotType, Strength: e.strength,
+        Possession_Class: e.cls, Seconds_Since_Entry: e.sec ?? "", Seconds_Since_Possession_Start: e.secStart ?? "",
+        Second_Chance: yn(t.second), Third_Plus_Chance: yn(t.third), Traffic: yn(t.traffic), Low_Value: yn(t.low),
+        Zone: e.zone, X: e.x ?? "", Y: e.y ?? "", Elapsed_Seconds: e.elapsed ?? "", Notes: e.why }) });
+    } else if (e.kind === "takeaway" || e.kind === "giveaway") {
+      rows.push({ key: tkey(e.pn, e.elapsed), prio: -1, ord: e.sort, r: Object.assign({}, common, {
+        Team: e.team, Game_Clock: e.clock, Period: e.period, Event: (e.kind === "takeaway" ? "Takeaway" : "Giveaway") + " (NHL)",
+        Is_Scoring_Chance: "NO", Penalty_Drawn: "NO", Led_To_Goal: "NO", Shot_Result: "",
+        Source: "NHL API", Event_Type: e.kind === "takeaway" ? "Takeaway" : "Giveaway", Event_ID: e.apiId, Shooter: e.player || "",
+        Zone: e.zone, X: e.x ?? "", Y: e.y ?? "", Elapsed_Seconds: e.elapsed ?? "" }) });
+    } else if (e.kind === "penalty") {
+      rows.push({ key: tkey(e.pn, e.elapsed), prio: -1, ord: e.sort, r: Object.assign({}, common, {
+        Team: e.team, Game_Clock: e.clock, Period: e.period, Event: "Penalty Drawn (NHL)",
+        Is_Scoring_Chance: "NO", Penalty_Drawn: "YES", Led_To_Goal: "NO", Shot_Result: "",
+        Source: "NHL API", Event_Type: "Penalty", Event_ID: e.apiId, Elapsed_Seconds: e.elapsed ?? "", Notes: e.note }) });
+    }
+  });
+  entries.forEach(x => rows.push({ key: x.key, prio: 0, ord: x.uid, r: Object.assign({}, common, {
+    Team: x.team, Game_Clock: x.clock, Period: x.period, Event: x.event,
+    Is_Scoring_Chance: "NO", Penalty_Drawn: "NO", Led_To_Goal: "NO", Shot_Result: "",
+    Source: "Manual", Event_Type: "Zone Entry", Entry_Type: x.entryType, Elapsed_Seconds: x.elapsed }) }));
+  manual.forEach(x => rows.push({ key: x.key, prio: 3, ord: x.uid, r: Object.assign({}, common, {
+    Team: x.team, Game_Clock: x.clock, Period: x.period, Event: x.event,
+    Is_Scoring_Chance: x.chance, Penalty_Drawn: x.penalty, Led_To_Goal: x.goal, Shot_Result: "",
+    Source: "Manual", Event_Type: "Manual Event", Elapsed_Seconds: x.elapsed }) }));
+
+  rows.sort((a, b) => a.key - b.key || a.prio - b.prio || a.ord - b.ord);
+  return rows.map(x => x.r);
+}
+
+function exportCSV() {
+  if (!game) { setMsg("Import a game first.", "err"); return; }
+  const rows = buildRows();
+  const lines = [CSV_COLS.map(csvCell).join(",")];
+  rows.forEach(r => lines.push(CSV_COLS.map(c => csvCell(r[c])).join(",")));
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const [yyyy, mm, dd] = String(game.date).split("-");
+  const stamp = yyyy ? (yyyy.slice(2) + "_" + Number(mm) + "_" + Number(dd)) : "unknown_date";
+  a.download = `${stamp}_${analyzedTeam()}_VS_${analyzedOpponent()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setMsg(`Exported ${rows.length} rows to ${a.download}`, "ok");
+  window._lastCsv = lines.join("\r\n");
+}
+</script>
+</body>
+</html>

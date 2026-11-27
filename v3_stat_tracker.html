@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NHL Live Event Tracker</title>
+  <style>
+    :root {
+      --team-color: #006847;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #fff;
+      padding: 20px;
+    }
+
+    h1 { color: var(--team-color); }
+
+    label { display: block; margin-top: 10px; }
+
+    input, select, button {
+      padding: 6px;
+      margin-top: 4px;
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      margin-top: 20px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th, td {
+      border: 1px solid #333;
+      padding: 6px;
+      text-align: left;
+    }
+
+    th {
+      background: #222;
+    }
+
+    .goal { background: #2e7d32; }
+    .chance { background: #1565c0; }
+    .penalty { background: #f9a825; color: #000; }
+    .possession-end { background: #8b0000; color: #fff; }
+
+    .chance.goal {
+      background: #1b5e20;
+    }
+
+    #shotResultModal {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #222;
+      border: 2px solid var(--team-color);
+      padding: 20px;
+      border-radius: 8px;
+      z-index: 1000;
+      box-shadow: 0 0 20px rgba(0, 104, 71, 0.5);
+    }
+    #shotResultModal button {
+      margin: 5px;
+      padding: 10px 15px;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 4px;
+      border: none;
+    }
+    .btn-goal { background: #2e7d32; color: white; }
+    .btn-save { background: #1565c0; color: white; }
+    .btn-miss { background: #757575; color: white; }
+    .btn-blocked { background: #f9a825; color: black; }
+    .btn-skip { background: #333; color: white; }
+
+    #legend {
+      margin-top: 10px;
+      background: #222;
+      padding: 10px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      max-width: 380px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>NHL Live Event Tracker</h1>
+
+<label>Team:
+  <select id="team" onchange="updateTeamColor()">
+    <option value="Stars" selected>Dallas Stars</option>
+    <option value="Ducks">Anaheim Ducks</option>
+    <option value="Islanders">NY Islanders</option>
+    <option value="Sharks">San Jose Sharks</option>
+    <option value="Maple Leafs">Toronto Maple Leafs</option>
+    <option value="Red Wings">Detroit Red Wings</option>
+  </select>
+</label>
+
+<label>Opponent:
+  <input id="opponent" type="text">
+</label>
+
+<label>Date:
+  <input id="date" type="date">
+</label>
+
+<label>Period:
+  <select id="period">
+    <option value="1">1</option>
+    <option value="2">2</option>
+    <option value="3">3</option>
+    <option value="OT">OT</option>
+  </select>
+</label>
+
+<label>Game Clock (MM:SS):
+  <input id="gameClock" type="text" placeholder="e.g. 12:34" maxlength="5">
+</label>
+
+<br>
+<button onclick="startTracking()">Start Tracking</button>
+<button onclick="exportCSV()">Export CSV</button>
+
+<!-- Shot Result Modal (OPTIONAL) -->
+<div id="shotResultModal">
+  <h3 style="color: var(--team-color); margin-top: 0;">Shot Result? (ESC to skip)</h3>
+  <button class="btn-goal" onclick="setShotResult('Goal')">GOAL</button>
+  <button class="btn-save" onclick="setShotResult('Save')">SAVE</button>
+  <button class="btn-miss" onclick="setShotResult('Miss')">MISS</button>
+  <button class="btn-blocked" onclick="setShotResult('Blocked')">BLOCKED</button>
+  <br>
+  <button class="btn-skip" onclick="setShotResult('')">Skip</button>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Team</th>
+      <th>Game Clock</th>
+      <th>Period</th>
+      <th>Event</th>
+      <th>Scoring Chance</th>
+      <th>Penalty Drawn</th>
+      <th>Led To Goal</th>
+      <th>Shot Result</th>
+    </tr>
+  </thead>
+  <tbody id="log"></tbody>
+</table>
+
+<div id="legend">
+  <details>
+    <summary style="cursor:pointer; color:var(--team-color); font-size:14px;">
+      Hotkey Legend (click to expand)
+    </summary>
+    <div style="font-size:12px; margin-top:8px; line-height:1.4;">
+      <b>1</b> – DZ Blueline Play Shut Down<br>
+      <b>2</b> – D-Man Aggressive Gap Close<br>
+      <b>3</b> – DZ → OZ Transition Completed<br>
+      <b>4</b> – Stretch Pass → OZ Possession<br>
+      <b>5</b> – Rush Shot (&lt;5s after entry)<br>
+      <b>6</b> – Early Possession Shot (&lt;10s)<br>
+      <b>7</b> – Sustained Possession Shot (10–30s)<br>
+      <b>X</b> – Extended Possession Shot (&gt;30s)<br>
+      <b>8</b> – 2nd Scoring Chance (Same Possession)<br>
+      <b>9</b> – 3rd+ Scoring Chance (Same Possession)<br>
+      <b>0</b> – Shot With Traffic<br>
+      <b>-</b> – Low-Value Shot<br>
+      <b>=</b> – OZ Turnover Forced<br>
+      <b>A</b> – Activated D-Man (OZ)<br>
+      <b>L</b> – Lost Possession (NEW!)<br>
+      <hr style="border-color: #444; margin: 8px 0;">
+      <b>S</b> – Mark LAST Event as Scoring Chance<br>
+      <b>P</b> – Mark LAST Event as Penalty Drawn<br>
+      <b>G</b> – Mark LAST Event as Leading to Goal<br>
+      <b>Backspace</b> – Undo<br>
+      <hr style="border-color: #444; margin: 8px 0;">
+      <b style="color: var(--team-color);">Optional Shot Result:</b><br>
+      After shot → Modal appears<br>
+      Press ESC to skip
+    </div>
+  </details>
+</div>
+
+<script>
+let tracking = false;
+let events = [];
+let lastEventIndex = null;
+let pendingShotEventIndex = null;
+
+const UNDO_KEY = "Backspace";
+
+const teamColors = {
+  "Stars": "#006847",
+  "Ducks": "#F47A1F",
+  "Islanders": "#00539B",
+  "Sharks": "#006D75",
+  "Maple Leafs": "#00205B",
+  "Red Wings": "#CE1126"
+};
+
+const shotEvents = [
+  "Rush Shot (<5s After Zone Entry)",
+  "Early Possession Shot (<10s)",
+  "Sustained Possession Shot (10–30s)",
+  "Extended Possession Shot (>30s)",
+  "2nd Scoring Chance (Same Possession)",
+  "3rd+ Scoring Chance (Same Possession)",
+  "Shot With Traffic",
+  "Low-Value Shot"
+];
+
+function updateTeamColor() {
+  const team = document.getElementById("team").value;
+  document.documentElement.style.setProperty("--team-color", teamColors[team]);
+}
+updateTeamColor();
+
+const eventMap = {
+  "1": "DZ Blueline Play Shut Down",
+  "2": "D-Man Aggressive Gap Close",
+  "3": "DZ → OZ Transition Completed",
+  "4": "Stretch Pass → OZ Possession",
+  "5": "Rush Shot (<5s After Zone Entry)",
+  "6": "Early Possession Shot (<10s)",
+  "7": "Sustained Possession Shot (10–30s)",
+  "8": "2nd Scoring Chance (Same Possession)",
+  "9": "3rd+ Scoring Chance (Same Possession)",
+  "0": "Shot With Traffic",
+  "-": "Low-Value Shot",
+  "=": "OZ Turnover Forced",
+  "a": "Activated D-Man (OZ)",
+  "l": "Lost Possession"  // 🔥 NEW EVENT
+};
+
+function startTracking() {
+  tracking = true;
+  alert("Tracking started. Use hotkeys to log events.");
+}
+
+document.getElementById("gameClock").addEventListener("input", function(e) {
+  let value = e.target.value.replace(/\D/g, "");
+  if (value.length >= 3) {
+    value = value.slice(0, 2) + ":" + value.slice(2, 4);
+  }
+  e.target.value = value.slice(0, 5);
+});
+
+document.addEventListener("keydown", function(e) {
+  if (!tracking) return;
+  
+  // Close modal on ESC
+  if (e.key === "Escape" && document.getElementById("shotResultModal").style.display === "block") {
+    setShotResult('');
+    return;
+  }
+  
+  if (document.activeElement.tagName === "INPUT") return;
+
+  const key = e.key.toLowerCase();
+
+  if (key === UNDO_KEY.toLowerCase() && events.length > 0) {
+    events.pop();
+    document.getElementById("log").deleteRow(-1);
+    lastEventIndex = events.length - 1;
+    return;
+  }
+
+  if (key === "x") {
+    logEvent("Extended Possession Shot (>30s)");
+    return;
+  }
+
+  if (eventMap[key]) logEvent(eventMap[key]);
+
+  if (lastEventIndex !== null) {
+    const row = document.getElementById("log").rows[lastEventIndex];
+    if (key === "s") tagOutcome("chance", row, 4);
+    if (key === "p") tagOutcome("penalty", row, 5);
+    if (key === "g") tagOutcome("goal", row, 6);
+  }
+});
+
+function tagOutcome(type, row, cellIndex) {
+  events[lastEventIndex][type] = "YES";
+  row.classList.add(type);
+  row.cells[cellIndex].innerText = "YES";
+}
+
+function logEvent(eventName) {
+  const team = document.getElementById("team").value;
+  const clock = document.getElementById("gameClock").value;
+  const period = document.getElementById("period").value;
+
+  const event = {
+    team,
+    clock,
+    period,
+    event: eventName,
+    chance: "NO",
+    penalty: "NO",
+    goal: "NO",
+    shotResult: ""
+  };
+
+  events.push(event);
+  lastEventIndex = events.length - 1;
+
+  const row = document.createElement("tr");
+  row.innerHTML = `
+    <td>${team}</td>
+    <td>${clock}</td>
+    <td>${period}</td>
+    <td>${eventName}</td>
+    <td>NO</td>
+    <td>NO</td>
+    <td>NO</td>
+    <td></td>
+  `;
+  
+  // 🔥 Highlight "Lost Possession" rows in dark red
+  if (eventName === "Lost Possession") {
+    row.classList.add("possession-end");
+  }
+  
+  document.getElementById("log").appendChild(row);
+  
+  // Show shot result modal if this is a shot event (OPTIONAL)
+  if (shotEvents.includes(eventName)) {
+    pendingShotEventIndex = lastEventIndex;
+    document.getElementById("shotResultModal").style.display = "block";
+  }
+}
+
+function setShotResult(result) {
+  if (pendingShotEventIndex !== null) {
+    events[pendingShotEventIndex].shotResult = result;
+    const row = document.getElementById("log").rows[pendingShotEventIndex];
+    row.cells[7].innerText = result;
+    
+    // Auto-mark as goal if result is Goal
+    if (result === "Goal") {
+      events[pendingShotEventIndex].goal = "YES";
+      row.classList.add("goal");
+      row.cells[6].innerText = "YES";
+    }
+  }
+  
+  document.getElementById("shotResultModal").style.display = "none";
+  pendingShotEventIndex = null;
+}
+
+function exportCSV() {
+  const team = document.getElementById("team").value;
+  const opponent = document.getElementById("opponent").value || "Unknown";
+  const date = document.getElementById("date").value || "Unknown";
+  
+  let csv = "Team,Game_Clock,Period,Event,Is_Scoring_Chance,Penalty_Drawn,Led_To_Goal,Shot_Result\n";
+  events.forEach(e => {
+    csv += `${e.team},${e.clock},${e.period},"${e.event}",${e.chance},${e.penalty},${e.goal},${e.shotResult}\n`;
+  });
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${team.toLowerCase().replace(" ", "_")}_vs_${opponent.toLowerCase().replace(" ", "_")}_${date}.csv`;
+  a.click();
+}
+</script>
+
+</body>
+</html>
