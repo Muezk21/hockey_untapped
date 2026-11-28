@@ -239,17 +239,28 @@ def analyze_v4_exports(exports):
             "file": frame["__file"].iloc[0], "game_id": game_id,
             "rows": len(frame), "ducks_shots": len(shots),
             "carry_ins": len(carryins),
+            "shots_with_entry_id": int(shots.get("Entry_ID", pd.Series(dtype=str)).map(nonblank).sum()) if "Entry_ID" in shots else 0,
+            "shots_with_possession_id": int(shots["Possession_ID"].map(nonblank).sum()),
             "has_possession_ids": ducks["Possession_ID"].map(nonblank).any(),
         })
 
         for _, r in shots.iterrows():
-            if str(r.get("Possession_Class", "")) in {"Rush", "Early", "Sustained", "Extended"}:
+            category = str(r.get("Possession_Class", ""))
+            # Only count timing observations backed by a recorded carry-in ID and numeric elapsed time.
+            try:
+                seconds_since_entry = float(r.get("Seconds_Since_Entry", ""))
+            except (TypeError, ValueError):
+                seconds_since_entry = None
+            if category in {"Rush", "Early", "Sustained", "Extended"} and nonblank(r.get("Entry_ID", "")) and seconds_since_entry is not None and seconds_since_entry >= 0:
                 shot_rows.append({
                     "game_id": game_id,
-                    "category": str(r.get("Possession_Class")),
+                    "category": category,
+                    "seconds_since_entry": seconds_since_entry,
                     "chance": yes(r.get("Is_Scoring_Chance", "NO")) or yes(r.get("Second_Chance", "NO")) or yes(r.get("Third_Plus_Chance", "NO")),
                     "goal": str(r.get("Shot_Result", "")).strip().lower() == "goal",
                     "event_id": str(r.get("Event_ID", "")),
+                    "entry_id": str(r.get("Entry_ID", "")),
+                    "possession_id": str(r.get("Possession_ID", "")),
                 })
 
         if not ducks["Possession_ID"].map(nonblank).any():
@@ -436,10 +447,15 @@ def main():
             shotdf = pd.DataFrame(v4_shots)
             rows = []
             for category, group in shotdf.groupby("category"):
+                successes = int(group["chance"].sum())
+                lo, hi = cluster_bootstrap_rate(group.to_dict("records"), "chance")
                 rows.append({
                     "Category": category, "Shots": len(group),
-                    "Scoring_Chance": int(group["chance"].sum()),
+                    "Scoring_Chance": successes,
                     "Chance_Rate_%": round(100*group["chance"].mean(), 2),
+                    "Chance_Rate_Game_Cluster_CI_Low_%": round(100*lo, 2) if lo is not None else "",
+                    "Chance_Rate_Game_Cluster_CI_High_%": round(100*hi, 2) if hi is not None else "",
+                    "Mean_Seconds_Since_Entry": round(group["seconds_since_entry"].mean(), 2),
                     "Actual_Goals": int(group["goal"].sum()),
                     "Goal_Rate_%": round(100*group["goal"].mean(), 2),
                 })
