@@ -587,9 +587,10 @@ function reclassify() {
 }
 
 function classifyOwnShot(e, poss, lastReset) {
-  e.sec = null; e.secStart = null; e.possessionId = poss ? poss.id : ""; e.entryId = poss ? poss.entryId : "";
+  e.sec = null; e.secStart = null;
   if (e.elapsed === null) { e.cls = "Unclassified"; e.why = "The NHL did not provide a time for this shot."; return; }
   if (poss && poss.pn !== e.pn) poss = null;
+  e.possessionId = poss ? poss.id : ""; e.entryId = poss ? poss.entryId : "";
   if (!poss) {
     e.cls = "Unclassified";
     e.why = "No possession recorded before this shot. Last reset: " + lastReset + ".";
