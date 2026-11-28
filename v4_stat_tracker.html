@@ -505,6 +505,9 @@ function timingClass(d) {
 function reclassify() {
   if (!game) return;
   const team = analyzedTeam();
+  entries.forEach(x => { x.possessionId = ""; x.entryId = ""; });
+  manual.forEach(x => { x.possessionId = ""; x.entryId = ""; });
+  official.forEach(x => { x.possessionId = ""; x.entryId = ""; });
   const items = [];
   let possessionSerial = 0;
   let entrySerial = 0;
@@ -541,6 +544,7 @@ function reclassify() {
         if (e.result === "Goal") reset("goal at " + e.period + " " + e.clock);
       } else if (e.kind === "takeaway" || e.kind === "giveaway") {
         if (e.team !== team && e.team !== analyzedOpponent()) continue;
+        e.possessionId = poss ? poss.id : "";
         const turnoverByAnalyzedTeam = e.team === team;
         const ducksGainPossession = (e.kind === "takeaway" && turnoverByAnalyzedTeam) ||
                                     (e.kind === "giveaway" && !turnoverByAnalyzedTeam);
@@ -562,6 +566,7 @@ function reclassify() {
         poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
                  entry: e.elapsed, entryClock: e.clock, entryType: e.entryType, entryId: game.id + "-E" + (++entrySerial), used: false };
       }
+      e.possessionId = poss ? poss.id : ""; e.entryId = poss ? poss.entryId : "";
     } else {
       if (e.event === "OZ Turnover Forced" || e.event === "DZ Blueline Play Shut Down") {
         poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
@@ -922,11 +927,11 @@ function buildRows() {
   entries.forEach(x => rows.push({ key: x.key, prio: 0, ord: x.uid, r: Object.assign({}, common, {
     Team: x.team, Game_Clock: x.clock, Period: x.period, Event: x.event,
     Is_Scoring_Chance: "NO", Penalty_Drawn: "NO", Led_To_Goal: "NO", Shot_Result: "",
-    Source: "Manual", Event_Type: "Zone Entry", Entry_Type: x.entryType, Elapsed_Seconds: x.elapsed }) }));
+    Source: "Manual", Event_Type: "Zone Entry", Entry_Type: x.entryType, Possession_ID: x.possessionId || "", Entry_ID: x.entryId || "", Elapsed_Seconds: x.elapsed }) }));
   manual.forEach(x => rows.push({ key: x.key, prio: 3, ord: x.uid, r: Object.assign({}, common, {
     Team: x.team, Game_Clock: x.clock, Period: x.period, Event: x.event,
     Is_Scoring_Chance: x.chance, Penalty_Drawn: x.penalty, Led_To_Goal: x.goal, Shot_Result: "",
-    Source: "Manual", Event_Type: "Manual Event", Elapsed_Seconds: x.elapsed }) }));
+    Source: "Manual", Event_Type: "Manual Event", Possession_ID: x.possessionId || "", Entry_ID: x.entryId || "", Elapsed_Seconds: x.elapsed }) }));
 
   rows.sort((a, b) => a.key - b.key || a.prio - b.prio || a.ord - b.ord);
   return rows.map(x => x.r);
