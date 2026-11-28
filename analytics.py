@@ -10,12 +10,16 @@ REPORTS_DIR = BASE_DIR / "analytics_reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
 TIMING_LABELS = {
+    "Rush Shot (<5 seconds)": "Rush",
     "Rush Shot (<5s After Zone Entry)": "Rush",
     "Rush Shot (rush / unsettled) <5s within zone entry": "Rush",
+    "Early Possession Shot (5–10 seconds)": "Early",
     "Early Possession Shot (<10s)": "Early",
     "Early Possession Shot <10s within zone entry": "Early",
+    "Sustained Possession Shot (10–30 seconds)": "Sustained",
     "Sustained Possession Shot (10–30s)": "Sustained",
     "Sustained Possession Shot – 10–30s of in-zone possession": "Sustained",
+    "Extended Possession Shot (>30 seconds)": "Extended",
     "Extended Possession Shot (>30s)": "Extended",
 }
 FOLLOWUP_LABELS = {
