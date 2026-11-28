@@ -571,8 +571,12 @@ function reclassify() {
       if (e.event === "OZ Turnover Forced" || e.event === "DZ Blueline Play Shut Down") {
         poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
                  entry: null, entryClock: "", entryType: "", entryId: "", used: false };
+        e.possessionId = poss.id;
       } else if (e.event === "Lost Possession") {
+        e.possessionId = poss ? poss.id : ""; e.entryId = poss ? poss.entryId : "";
         reset("Lost Possession (your L) at " + e.period + " " + e.clock);
+      } else {
+        e.possessionId = poss ? poss.id : ""; e.entryId = poss ? poss.entryId : "";
       }
     }
   }
