@@ -457,6 +457,7 @@ async function importGame() {
 
     const restored = loadSession();
     applyTeam();
+    reclassify();
 
     // data check line: what the NHL actually sent
     const shots = official.filter(e => e.kind === "shot");
@@ -946,6 +947,7 @@ function buildRows() {
 
 function exportCSV() {
   if (!game) { setMsg("Import a game first.", "err"); return; }
+  reclassify();
   const rows = buildRows();
   const lines = [CSV_COLS.map(csvCell).join(",")];
   rows.forEach(r => lines.push(CSV_COLS.map(c => csvCell(r[c])).join(",")));
