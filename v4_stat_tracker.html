@@ -544,7 +544,7 @@ function reclassify() {
         if (e.result === "Goal") reset("goal at " + e.period + " " + e.clock);
       } else if (e.kind === "takeaway" || e.kind === "giveaway") {
         if (e.team !== team && e.team !== analyzedOpponent()) continue;
-        e.possessionId = poss ? poss.id : "";
+        const possessionBeforeTurnover = poss ? poss.id : "";
         const turnoverByAnalyzedTeam = e.team === team;
         const ducksGainPossession = (e.kind === "takeaway" && turnoverByAnalyzedTeam) ||
                                     (e.kind === "giveaway" && !turnoverByAnalyzedTeam);
@@ -553,7 +553,9 @@ function reclassify() {
           poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: label,
                    entry: null, entryClock: "", entryType: "", entryId: "", used: false };
           lastReset = label + " (Anaheim possession begins; awaiting carry-in)";
+          e.possessionId = poss.id;
         } else {
+          e.possessionId = possessionBeforeTurnover;
           reset(label + " (Anaheim possession ends)");
         }
       } else {
@@ -920,7 +922,7 @@ function buildRows() {
       rows.push({ key: tkey(e.pn, e.elapsed), prio: -1, ord: e.sort, r: Object.assign({}, common, {
         Team: e.team, Game_Clock: e.clock, Period: e.period, Event: (e.kind === "takeaway" ? "Takeaway" : "Giveaway") + " (NHL)",
         Is_Scoring_Chance: "NO", Penalty_Drawn: "NO", Led_To_Goal: "NO", Shot_Result: "",
-        Source: "NHL API", Event_Type: e.kind === "takeaway" ? "Takeaway" : "Giveaway", Event_ID: e.apiId, Shooter: e.player || "",
+        Source: "NHL API", Event_Type: e.kind === "takeaway" ? "Takeaway" : "Giveaway", Event_ID: e.apiId, Possession_ID: e.possessionId || "", Shooter: e.player || "",
         Zone: e.zone, X: e.x ?? "", Y: e.y ?? "", Elapsed_Seconds: e.elapsed ?? "" }) });
     } else if (e.kind === "penalty") {
       rows.push({ key: tkey(e.pn, e.elapsed), prio: -1, ord: e.sort, r: Object.assign({}, common, {
