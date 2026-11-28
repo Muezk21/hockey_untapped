@@ -202,16 +202,19 @@ const SHOT_RESULT = { "goal":"Goal", "shot-on-goal":"Save", "missed-shot":"Miss"
 const RESET_TYPES = new Set(["faceoff","stoppage","period-start","period-end","game-end"]);
 // CSV event names for each classification (same wording as the old tracker)
 const CLASS_EVENT = {
-  Rush: "Rush Shot (<5s After Zone Entry)",
-  Early: "Early Possession Shot (<10s)",
-  Sustained: "Sustained Possession Shot (10–30s)",
-  Extended: "Extended Possession Shot (>30s)",
+  Rush: "Rush Shot (<5 seconds)",
+  Early: "Early Possession Shot (5–10 seconds)",
+  Sustained: "Sustained Possession Shot (10–30 seconds)",
+  Extended: "Extended Possession Shot (>30 seconds)",
   "Follow-up": "Follow-up Shot (Same Possession)",
   Unclassified: "Unclassified Shot",
   Opponent: "Opponent Shot"
 };
 const CLASS_LABEL = {
-  Rush: "Rush (<5s)", Early: "Early (5–10s)", Sustained: "Sustained (10–30s)", Extended: "Extended (>30s)",
+  Rush: "Rush Shot (<5 seconds)",
+  Early: "Early Possession Shot (5–10 seconds)",
+  Sustained: "Sustained Possession Shot (10–30 seconds)",
+  Extended: "Extended Possession Shot (>30 seconds)",
   "Follow-up": "Follow-up (same possession)", Unclassified: "Unclassified", Opponent: "— (other team)"
 };
 
