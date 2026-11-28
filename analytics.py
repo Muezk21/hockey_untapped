@@ -221,6 +221,7 @@ def load_v4_exports():
 def analyze_v4_exports(exports):
     possession_rows = []
     entry_rows = []
+    entry_shot_rows = []
     shot_rows = []
     audit_rows = []
     gap_rows = []
@@ -235,6 +236,13 @@ def analyze_v4_exports(exports):
             (ducks["Event"].astype(str) == "Carry-in")
         ]
         shots = ducks[ducks["Event_Type"].astype(str) == "Shot"].copy()
+        for _, entry in carryins.iterrows():
+            if nonblank(entry.get("Entry_ID", "")):
+                entry_rows.append({
+                    "game_id": game_id,
+                    "entry_id": str(entry.get("Entry_ID")),
+                    "possession_id": str(entry.get("Possession_ID", "")),
+                })
         audit_rows.append({
             "file": frame["__file"].iloc[0], "game_id": game_id,
             "rows": len(frame), "ducks_shots": len(shots),
@@ -251,17 +259,26 @@ def analyze_v4_exports(exports):
                 seconds_since_entry = float(r.get("Seconds_Since_Entry", ""))
             except (TypeError, ValueError):
                 seconds_since_entry = None
-            if category in {"Rush", "Early", "Sustained", "Extended"} and nonblank(r.get("Entry_ID", "")) and seconds_since_entry is not None and seconds_since_entry >= 0:
-                shot_rows.append({
+            if nonblank(r.get("Entry_ID", "")) and seconds_since_entry is not None and seconds_since_entry >= 0:
+                entry_shot_rows.append({
                     "game_id": game_id,
-                    "category": category,
-                    "seconds_since_entry": seconds_since_entry,
+                    "entry_id": str(r.get("Entry_ID", "")),
+                    "event_id": str(r.get("Event_ID", "")),
                     "chance": yes(r.get("Is_Scoring_Chance", "NO")) or yes(r.get("Second_Chance", "NO")) or yes(r.get("Third_Plus_Chance", "NO")),
                     "goal": str(r.get("Shot_Result", "")).strip().lower() == "goal",
-                    "event_id": str(r.get("Event_ID", "")),
-                    "entry_id": str(r.get("Entry_ID", "")),
-                    "possession_id": str(r.get("Possession_ID", "")),
+                    "seconds_since_entry": seconds_since_entry,
                 })
+                if category in {"Rush", "Early", "Sustained", "Extended"}:
+                    shot_rows.append({
+                        "game_id": game_id,
+                        "category": category,
+                        "seconds_since_entry": seconds_since_entry,
+                        "chance": yes(r.get("Is_Scoring_Chance", "NO")) or yes(r.get("Second_Chance", "NO")) or yes(r.get("Third_Plus_Chance", "NO")),
+                        "goal": str(r.get("Shot_Result", "")).strip().lower() == "goal",
+                        "event_id": str(r.get("Event_ID", "")),
+                        "entry_id": str(r.get("Entry_ID", "")),
+                        "possession_id": str(r.get("Possession_ID", "")),
+                    })
 
         if not ducks["Possession_ID"].map(nonblank).any():
             continue
@@ -315,7 +332,20 @@ def analyze_v4_exports(exports):
                         "turnover_clock": turnover["Game_Clock"], "seconds_after": delta,
                     })
 
-    return possession_rows, shot_rows, audit_rows, gap_rows
+    shots_by_entry = {}
+    for shot in entry_shot_rows:
+        shots_by_entry.setdefault((shot["game_id"], shot["entry_id"]), []).append(shot)
+    entry_outcomes = []
+    for entry in entry_rows:
+        group = shots_by_entry.get((entry["game_id"], entry["entry_id"]), [])
+        entry_outcomes.append({
+            **entry,
+            "shots": len(group),
+            "has_shot": bool(group),
+            "has_chance": any(x["chance"] for x in group),
+            "has_goal": any(x["goal"] for x in group),
+        })
+    return possession_rows, shot_rows, audit_rows, gap_rows, entry_outcomes
 
 
 def rate_text(successes, total):
@@ -426,7 +456,7 @@ def main():
 
     exports = load_v4_exports()
     if exports:
-        possessions, v4_shots, audit, v4_gaps = analyze_v4_exports(exports)
+        possessions, v4_shots, audit, v4_gaps, v4_entries = analyze_v4_exports(exports)
         print(f"\nV4 EXPORTS: {len(exports)} game export(s)")
         for a in audit:
             print(f"  {a['file']}: {a['ducks_shots']} Ducks shots, {a['carry_ins']} carry-ins, possession IDs: {'yes' if a['has_possession_ids'] else 'no'}")
@@ -460,6 +490,13 @@ def main():
                     "Goal_Rate_%": round(100*group["goal"].mean(), 2),
                 })
             pd.DataFrame(rows).to_csv(REPORTS_DIR / "v4_entry_timing_metrics.csv", index=False)
+        if v4_entries:
+            edf = pd.DataFrame(v4_entries)
+            print(f"  Recorded carry-ins: {len(edf)} | with shot: {int(edf['has_shot'].sum())} | with chance: {int(edf['has_chance'].sum())} | with goal: {int(edf['has_goal'].sum())}")
+            print(f"  Entry → shot: {rate_text(int(edf['has_shot'].sum()), len(edf))}")
+            print(f"  Entry → chance: {rate_text(int(edf['has_chance'].sum()), len(edf))}")
+            print(f"  Entry → goal: {rate_text(int(edf['has_goal'].sum()), len(edf))}")
+            edf.to_csv(REPORTS_DIR / "v4_entry_outcomes.csv", index=False)
         pd.DataFrame(audit).to_csv(REPORTS_DIR / "v4_export_audit.csv", index=False)
         pd.DataFrame(v4_gaps).to_csv(REPORTS_DIR / "v4_gap_close_matches.csv", index=False)
     else:
