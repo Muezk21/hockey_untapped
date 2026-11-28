@@ -1,486 +1,458 @@
+import math
+import random
+from pathlib import Path
+
 import pandas as pd
-import os
 
-# === SETTINGS ===
-BASE_DIR = r"C:\Users\khanm\OneDrive\Projects\stat_tracker"
-MASTER_FILE = os.path.join(BASE_DIR, "master_dataset.csv")
-REPORTS_DIR = os.path.join(BASE_DIR, "analytics_reports")
+BASE_DIR = Path(__file__).resolve().parent
+RAW_DIR = BASE_DIR / "raw_data" / "ducks_data"
+REPORTS_DIR = BASE_DIR / "analytics_reports"
+REPORTS_DIR.mkdir(exist_ok=True)
 
-GAP_WINDOW = 10            # seconds after a gap close to look for a forced turnover
-SECOND_CHANCE_WINDOW = 20  # seconds after a chance shot to look for another chance shot
+TIMING_LABELS = {
+    "Rush Shot (<5s After Zone Entry)": "Rush",
+    "Rush Shot (rush / unsettled) <5s within zone entry": "Rush",
+    "Early Possession Shot (<10s)": "Early",
+    "Early Possession Shot <10s within zone entry": "Early",
+    "Sustained Possession Shot (10–30s)": "Sustained",
+    "Sustained Possession Shot – 10–30s of in-zone possession": "Sustained",
+    "Extended Possession Shot (>30s)": "Extended",
+}
+FOLLOWUP_LABELS = {
+    "2nd Scoring Chance (Same Possession)": "2nd chance",
+    "3rd+ Scoring Chance (Same Possession)": "3rd+ chance",
+}
+DESCRIPTORS = {"Shot With Traffic": "Traffic", "Low-Value Shot": "Low-Value"}
+POSSESSION_STARTS = {"OZ Turnover Forced", "DZ Blueline Play Shut Down"}
+GAP_WINDOW = 10
+RNG = random.Random(20261127)
 
-# Create reports directory
-os.makedirs(REPORTS_DIR, exist_ok=True)
 
-# === LOAD DATA ===
-print("="*70)
-print("🏒 NHL STAT TRACKER - ANALYTICS ENGINE")
-print("="*70)
-print(f"\n📂 Loading data from: {MASTER_FILE}\n")
+def yes(value):
+    return str(value).strip().upper() in {"YES", "TRUE", "1"}
 
-if not os.path.exists(MASTER_FILE):
-    print(f"❌ ERROR: Master dataset not found!")
-    print(f"   Please run master_data_script.py first.")
-    exit(1)
 
-df = pd.read_csv(MASTER_FILE)
+def nonblank(value):
+    return pd.notna(value) and str(value).strip() != ""
 
-needed = ['shot_descriptor', 'label_matches_computed', 'derived_shot_type']
-missing = [c for c in needed if c not in df.columns]
-if missing:
-    print(f"❌ ERROR: master_dataset.csv is missing columns: {missing}")
-    print("   Run preprocess_events.py and master_data_script.py again, then rerun this script.")
-    print("   If the columns are still missing, master_data_script.py is dropping them - tell Claude.")
-    exit(1)
 
-print(f"✅ Loaded {len(df):,} events from {df['game_id'].nunique()} games")
-print(f"   Teams: {', '.join(sorted(df['team'].unique()))}")
-print()
+def wilson(successes, total, z=1.96):
+    if total <= 0:
+        return (None, None)
+    p = successes / total
+    den = 1 + z * z / total
+    center = (p + z * z / (2 * total)) / den
+    half = z * math.sqrt((p * (1 - p) / total) + z * z / (4 * total * total)) / den
+    return max(0, center - half), min(1, center + half)
 
-# === HELPER FUNCTIONS ===
 
-def calculate_percentage(numerator, denominator):
-    """Safely calculate percentage"""
-    if denominator == 0:
-        return 0.0
-    return (numerator / denominator) * 100
+def cluster_bootstrap_rate(records, field, reps=2500):
+    """Game-cluster bootstrap: resample games, not individual shots."""
+    if not records:
+        return (None, None)
+    games = {}
+    for row in records:
+        games.setdefault(row["game_id"], []).append(row)
+    game_ids = list(games)
+    if len(game_ids) < 2:
+        return (None, None)
+    estimates = []
+    for _ in range(reps):
+        chosen = [RNG.choice(game_ids) for _ in game_ids]
+        n = s = 0
+        for game_id in chosen:
+            sample = games[game_id]
+            n += len(sample)
+            s += sum(bool(x[field]) for x in sample)
+        if n:
+            estimates.append(s / n)
+    estimates.sort()
+    return estimates[int(.025 * (len(estimates) - 1))], estimates[int(.975 * (len(estimates) - 1))]
 
-def clock_to_seconds(clock_str):
-    """'12:34' -> 754. None if it can't be read."""
+
+def read_legacy_games():
+    if not RAW_DIR.exists():
+        return []
+    games = []
+    for path in sorted(RAW_DIR.glob("*.csv")):
+        frame = pd.read_csv(path, keep_default_na=False)
+        frame.columns = [str(c).strip() for c in frame.columns]
+        frame["game_id"] = path.stem
+        frame["source_group"] = "legacy_manual"
+        games.append(frame)
+    return games
+
+
+def make_legacy_shots(games):
+    """Recover shot rows from the old manual log without inventing entry times."""
+    shots = []
+    ambiguous_descriptors = 0
+    for frame in games:
+        groups = {}
+        for _, row in frame.iterrows():
+            event = str(row.get("Event", "")).strip()
+            if event in TIMING_LABELS or event in FOLLOWUP_LABELS or event in DESCRIPTORS:
+                key = (str(row.get("Period", "")), str(row.get("Game_Clock", "")))
+                groups.setdefault(key, []).append(row)
+
+        for (period, clock), rows in groups.items():
+            primary = [r for r in rows if str(r.get("Event", "")).strip() in TIMING_LABELS or
+                       str(r.get("Event", "")).strip() in FOLLOWUP_LABELS]
+            descriptors = [r for r in rows if str(r.get("Event", "")).strip() in DESCRIPTORS]
+
+            if primary:
+                for r in primary:
+                    event = str(r.get("Event", "")).strip()
+                    attached = descriptors if len(primary) == 1 else []
+                    if descriptors and len(primary) > 1:
+                        ambiguous_descriptors += len(descriptors)
+                    related = [r] + attached
+                    chance = any(yes(x.get("Is_Scoring_Chance", "NO")) for x in related)
+                    if event in FOLLOWUP_LABELS:
+                        chance = True
+                    goal = any(str(x.get("Shot_Result", "")).strip().lower() == "goal" for x in related)
+                    shots.append({
+                        "game_id": frame["game_id"].iloc[0],
+                        "period": period, "clock": clock,
+                        "category": TIMING_LABELS.get(event, FOLLOWUP_LABELS.get(event)),
+                        "chance": chance, "goal": goal,
+                        "traffic": any(str(x.get("Event", "")).strip() == "Shot With Traffic" for x in attached),
+                        "low_value": any(str(x.get("Event", "")).strip() == "Low-Value Shot" for x in attached),
+                    })
+            elif descriptors:
+                shots.append({
+                    "game_id": frame["game_id"].iloc[0],
+                    "period": period, "clock": clock, "category": "descriptor-only",
+                    "chance": any(yes(x.get("Is_Scoring_Chance", "NO")) for x in descriptors),
+                    "goal": any(str(x.get("Shot_Result", "")).strip().lower() == "goal" for x in descriptors),
+                    "traffic": any(str(x.get("Event", "")).strip() == "Shot With Traffic" for x in descriptors),
+                    "low_value": any(str(x.get("Event", "")).strip() == "Low-Value Shot" for x in descriptors),
+                })
+    return shots, ambiguous_descriptors
+
+
+def elapsed_from_clock(period, clock):
     try:
-        if pd.isna(clock_str):
-            return None
-        minutes, seconds = map(int, str(clock_str).split(":"))
-        return minutes * 60 + seconds
-    except:
+        m, s = [int(x) for x in str(clock).split(":")]
+        period_number = int(period)
+        return (period_number - 1) * 1200 + (1200 - (m * 60 + s))
+    except Exception:
         return None
 
-def get_possession_data(team_filter=None):
-    """Get possession-level data with outcomes"""
-    data = df.copy()
-    if team_filter:
-        data = data[data['team'] == team_filter]
 
-    # Group by possession
-    possessions = data.groupby(['game_id', 'possession_id']).agg({
-        'Is_Scoring_Chance': lambda x: (x == 'YES').any(),
-        'Led_To_Goal': lambda x: (x == 'YES').any(),
-        'shot_number_in_possession': 'max',
-        'Event': lambda x: list(x)
-    }).reset_index()
+def legacy_event_audit(games):
+    rows = []
+    all_events = []
+    for frame in games:
+        game_id = frame["game_id"].iloc[0]
+        for _, r in frame.iterrows():
+            event = str(r.get("Event", "")).strip()
+            all_events.append((game_id, r))
+            rows.append({
+                "game_id": game_id, "event": event,
+                "chance_flag": yes(r.get("Is_Scoring_Chance", "NO")),
+                "led_to_goal_flag": yes(r.get("Led_To_Goal", "NO")),
+                "actual_goal": str(r.get("Shot_Result", "")).strip().lower() == "goal",
+            })
+    return pd.DataFrame(rows), all_events
 
-    possessions.columns = ['game_id', 'possession_id', 'had_scoring_chance',
-                           'led_to_goal', 'num_shots', 'events']
 
-    return possessions
-
-# === METRIC 1: TURNOVER → SCORING CHANCE PIPELINE ===
-print("="*70)
-print("📊 METRIC 1: TURNOVER → SCORING CHANCE PIPELINE")
-print("="*70)
-
-turnover_events = df[df['Event'] == 'OZ Turnover Forced'].copy()
-print(f"\n🔍 Found {len(turnover_events)} 'OZ Turnover Forced' events\n")
-
-metric1_results = {}
-
-for team in sorted(df['team'].unique()):
-    team_turnovers = turnover_events[turnover_events['team'] == team]
-
-    if len(team_turnovers) == 0:
-        continue
-
-    # Get possessions that started with turnovers
-    turnover_possessions = team_turnovers[['game_id', 'possession_id']].drop_duplicates()
-
-    # Merge with full data to see outcomes
-    outcomes = pd.merge(
-        turnover_possessions,
-        df[['game_id', 'possession_id', 'Is_Scoring_Chance', 'Led_To_Goal', 'time_since_possession_start']],
-        on=['game_id', 'possession_id'],
-        how='left'
-    )
-
-    # Calculate metrics
-    total_turnover_poss = len(turnover_possessions)
-    scoring_chances = (outcomes['Is_Scoring_Chance'] == 'YES').sum()
-    goals = (outcomes['Led_To_Goal'] == 'YES').sum()
-
-    # Average time to shot after turnover
-    shots_after_turnover = outcomes[outcomes['time_since_possession_start'].notna()]
-    avg_time_to_shot = shots_after_turnover['time_since_possession_start'].mean() if len(shots_after_turnover) > 0 else 0
-
-    # Compare to non-turnover possessions
-    non_turnover_poss = get_possession_data(team)
-    non_turnover_poss = non_turnover_poss[~non_turnover_poss.set_index(['game_id', 'possession_id']).index.isin(
-        turnover_possessions.set_index(['game_id', 'possession_id']).index
-    )]
-
-    non_turnover_chance_rate = calculate_percentage(
-        non_turnover_poss['had_scoring_chance'].sum(),
-        len(non_turnover_poss)
-    )
-
-    turnover_chance_rate = calculate_percentage(scoring_chances, total_turnover_poss)
-
-    metric1_results[team] = {
-        'total_turnovers': len(team_turnovers),
-        'turnover_possessions': total_turnover_poss,
-        'scoring_chances': scoring_chances,
-        'goals': goals,
-        'turnover_chance_rate': turnover_chance_rate,
-        'non_turnover_chance_rate': non_turnover_chance_rate,
-        'avg_time_to_shot': avg_time_to_shot
-    }
-
-    print(f"{team}:")
-    print(f"   Total 'OZ Turnover Forced': {len(team_turnovers)}")
-    print(f"   Possessions generated: {total_turnover_poss}")
-    print(f"   → Scoring chances: {scoring_chances} ({turnover_chance_rate:.1f}%)")
-    print(f"   → Goals: {goals}")
-    print(f"   Avg time to shot: {avg_time_to_shot:.1f}s")
-    print(f"   📈 Non-turnover chance rate: {non_turnover_chance_rate:.1f}%")
-    print(f"   ✨ Turnover advantage: {turnover_chance_rate - non_turnover_chance_rate:+.1f}%\n")
-
-# === METRIC 2: SHOT TIMING (FROM ZONE ENTRY) → SCORING CHANCES ===
-print("="*70)
-print("📊 METRIC 2: SHOT TIMING (FROM ZONE ENTRY) → SCORING CHANCES")
-print("="*70)
-
-shots_with_timing = df[df['derived_shot_type'].notna() & (df['derived_shot_type'] != '')].copy()
-print(f"\n🔍 Found {len(shots_with_timing)} shots (double-logged shots already merged into one)\n")
-
-TIMED_GROUPS = ['Rush', 'Early', 'Sustained', 'Extended']
-OTHER_GROUPS = ['Traffic', 'Low-Value', '2nd chance', '3rd+ chance']
-
-metric2_results = {}
-
-for team in sorted(df['team'].unique()):
-    team_shots = shots_with_timing[shots_with_timing['team'] == team]
-
-    if len(team_shots) == 0:
-        continue
-
-    timing_breakdown = {}
-
-    for shot_group in TIMED_GROUPS + OTHER_GROUPS:
-        type_shots = team_shots[team_shots['derived_shot_type'] == shot_group]
-        chances = (type_shots['Is_Scoring_Chance'] == 'YES').sum()
-        goals = (type_shots['Led_To_Goal'] == 'YES').sum()
-        timing_breakdown[shot_group] = {
-            'count': len(type_shots),
-            'chance_rate': calculate_percentage(chances, len(type_shots)),
-            'goal_rate': calculate_percentage(goals, len(type_shots))
-        }
-
-    metric2_results[team] = timing_breakdown
-
-    print(f"{team}:")
-    print("   Timed shots (your 5/6/7/X key, timed from zone entry):")
-    for shot_group in TIMED_GROUPS:
-        data = timing_breakdown[shot_group]
-        print(f"   {shot_group:12} ({data['count']:3} shots): "
-              f"Chance rate {data['chance_rate']:5.1f}% | Goal rate {data['goal_rate']:5.1f}%")
-    print("   Shots with no timing key (Traffic / Low-Value only, 2nd / 3rd chance):")
-    for shot_group in OTHER_GROUPS:
-        data = timing_breakdown[shot_group]
-        print(f"   {shot_group:12} ({data['count']:3} shots): "
-              f"Chance rate {data['chance_rate']:5.1f}% | Goal rate {data['goal_rate']:5.1f}%")
-
-    if timing_breakdown['Rush']['count'] > 0 and timing_breakdown['Extended']['count'] > 0:
-        advantage = timing_breakdown['Rush']['chance_rate'] - timing_breakdown['Extended']['chance_rate']
-        print(f"   ✨ Rush advantage over Extended: {advantage:+.1f}%")
-        if timing_breakdown['Extended']['count'] < 10 or timing_breakdown['Rush']['count'] < 10:
-            print("   ⚠️  One of these groups has under 10 shots - treat the comparison as rough")
-
-    checked = team_shots['label_matches_computed'].dropna().map(lambda v: str(v).lower() == 'true')
-    if len(checked) > 0:
-        print(f"   Cross-check: on the {len(checked)} timed shots that have a logged zone entry, "
-              f"your key matches the entry-based timing on {int(checked.sum())} ({checked.mean() * 100:.0f}%)")
-    print()
-
-# === METRIC 3: SHOT EFFICIENCY & QUALITY ===
-print("="*70)
-print("📊 METRIC 3: SHOT EFFICIENCY & QUALITY")
-print("="*70)
-
-metric3_results = {}
-
-for team in sorted(df['team'].unique()):
-    team_data = df[df['team'] == team]
-    possessions = get_possession_data(team)
-
-    # Shots per possession
-    possessions_with_shots = possessions[possessions['num_shots'] > 0]
-    avg_shots_per_poss = possessions['num_shots'].mean()
-
-    # Scoring chance % per possession
-    chance_poss_rate = calculate_percentage(
-        possessions['had_scoring_chance'].sum(),
-        len(possessions)
-    )
-
-    # Shot type quality comparison
-    descriptor = team_data['shot_descriptor'].fillna('')
-    traffic_shots = team_data[descriptor == 'Traffic']      # every shot tagged Traffic (merged or alone)
-    low_value_shots = team_data[descriptor == 'Low-Value']  # every shot tagged Low-Value
-
-    traffic_chance_rate = calculate_percentage(
-        (traffic_shots['Is_Scoring_Chance'] == 'YES').sum(),
-        len(traffic_shots)
-    ) if len(traffic_shots) > 0 else 0
-
-    low_value_chance_rate = calculate_percentage(
-        (low_value_shots['Is_Scoring_Chance'] == 'YES').sum(),
-        len(low_value_shots)
-    ) if len(low_value_shots) > 0 else 0
-
-    # Average possession time before scoring chance
-    chances = team_data[team_data['Is_Scoring_Chance'] == 'YES']
-    avg_poss_time_for_chance = chances['time_since_possession_start'].mean() if len(chances) > 0 else 0
-
-    metric3_results[team] = {
-        'avg_shots_per_poss': avg_shots_per_poss,
-        'chance_poss_rate': chance_poss_rate,
-        'traffic_shots': len(traffic_shots),
-        'traffic_chance_rate': traffic_chance_rate,
-        'low_value_shots': len(low_value_shots),
-        'low_value_chance_rate': low_value_chance_rate,
-        'avg_poss_time_for_chance': avg_poss_time_for_chance
-    }
-
-    print(f"\n{team}:")
-    print(f"   Avg shots per possession (among possessions with a shot): {avg_shots_per_poss:.2f}")
-    print(f"   Possessions with scoring chance: {chance_poss_rate:.1f}%")
-    print(f"   'Shot With Traffic' chance rate: {traffic_chance_rate:.1f}% ({len(traffic_shots)} shots)")
-    print(f"   'Low-Value Shot' chance rate: {low_value_chance_rate:.1f}% ({len(low_value_shots)} shots)")
-    print(f"   Avg time in possession before chance: {avg_poss_time_for_chance:.1f}s")
-    if traffic_chance_rate > 0 and low_value_chance_rate > 0:
-        quality_diff = traffic_chance_rate - low_value_chance_rate
-        print(f"   ✨ Shot quality advantage: {quality_diff:+.1f}%")
-
-print()
-
-# === METRIC 4: D-MEN OFFENSIVE IMPACT ===
-print("="*70)
-print("📊 METRIC 4: D-MEN OFFENSIVE IMPACT")
-print("="*70)
-
-metric4_results = {}
-
-for team in sorted(df['team'].unique()):
-    team_data = df[df['team'] == team].copy()
-    team_data['clock_seconds'] = team_data['Game_Clock'].apply(clock_to_seconds)
-
-    # Possessions that contain a scoring chance / a goal (any event in the possession marked)
-    chance_poss = set(zip(
-        team_data.loc[team_data['Is_Scoring_Chance'] == 'YES', 'game_id'],
-        team_data.loc[team_data['Is_Scoring_Chance'] == 'YES', 'possession_id']))
-    goal_poss = set(zip(
-        team_data.loc[team_data['Led_To_Goal'] == 'YES', 'game_id'],
-        team_data.loc[team_data['Led_To_Goal'] == 'YES', 'possession_id']))
-
-    # --- Activated D-Man impact ---
-    activated_dman = team_data[team_data['Event'] == 'Activated D-Man (OZ)']
-
-    dman_possessions = activated_dman[['game_id', 'possession_id']].drop_duplicates()
-    dman_outcomes = pd.merge(
-        dman_possessions,
-        team_data[['game_id', 'possession_id', 'Is_Scoring_Chance', 'Led_To_Goal']],
-        on=['game_id', 'possession_id'],
-        how='left'
-    )
-
-    dman_chances = (dman_outcomes['Is_Scoring_Chance'] == 'YES').sum()
-    dman_chance_rate = calculate_percentage(dman_chances, len(dman_possessions)) if len(dman_possessions) > 0 else 0
-
-    # --- Aggressive gap close → forced turnover within GAP_WINDOW seconds ---
-    gap_close = team_data[team_data['Event'] == 'D-Man Aggressive Gap Close']
-
-    # Lookup of forced turnovers: (game, period) -> [(clock_seconds, possession_id), ...]
-    turnover_rows = team_data[(team_data['Event'] == 'OZ Turnover Forced') & team_data['clock_seconds'].notna()]
-    turn_lookup = {}
-    for _, r in turnover_rows.iterrows():
-        turn_lookup.setdefault((r['game_id'], r['Period']), []).append((r['clock_seconds'], r['possession_id']))
-
-    def first_turnover_within(game, period, t, window=GAP_WINDOW):
-        """Earliest forced turnover in the `window` seconds after clock time t (clock counts down)."""
-        hits = [(ts, pid) for ts, pid in turn_lookup.get((game, period), []) if t - window <= ts <= t]
-        return max(hits) if hits else None
-
-    gap_with_time = gap_close[gap_close['clock_seconds'].notna()]
-    turnovers_after_gap = 0
-    gap_chance_poss = 0      # turnover possession contained a scoring chance
-    gap_chance_broad = 0     # ...or S was marked on the gap close itself
-    gap_goals = 0
-
-    for _, g in gap_with_time.iterrows():
-        hit = first_turnover_within(g['game_id'], g['Period'], g['clock_seconds'])
-        if hit is None:
+def gap_close_matches(all_events):
+    """One-to-one temporal matches only; this is association, not proof of causation."""
+    gaps, turnovers = [], []
+    for game_id, r in all_events:
+        event = str(r.get("Event", "")).strip()
+        t = elapsed_from_clock(r.get("Period", ""), r.get("Game_Clock", ""))
+        if t is None:
             continue
-        turnovers_after_gap += 1
-        key = (g['game_id'], hit[1])
-        poss_chance = key in chance_poss
-        gap_marked_chance = (g['Is_Scoring_Chance'] == 'YES')
-        poss_goal = key in goal_poss
-        gap_marked_goal = (g['Led_To_Goal'] == 'YES')
-        gap_chance_poss += int(poss_chance)
-        gap_chance_broad += int(poss_chance or gap_marked_chance)
-        gap_goals += int(poss_goal or gap_marked_goal)
+        item = {
+            "game_id": game_id, "period": str(r.get("Period", "")),
+            "elapsed": t, "clock": str(r.get("Game_Clock", "")),
+            "chance": yes(r.get("Is_Scoring_Chance", "NO")),
+            "led_to_goal": yes(r.get("Led_To_Goal", "NO")),
+        }
+        if event == "D-Man Aggressive Gap Close":
+            gaps.append(item)
+        elif event == "OZ Turnover Forced":
+            turnovers.append(item)
+    gaps.sort(key=lambda x: (x["game_id"], x["period"], x["elapsed"]))
+    turnovers.sort(key=lambda x: (x["game_id"], x["period"], x["elapsed"]))
+    used = set()
+    matches = []
+    for gap in gaps:
+        candidates = []
+        for i, turnover in enumerate(turnovers):
+            if i in used:
+                continue
+            if (turnover["game_id"], turnover["period"]) != (gap["game_id"], gap["period"]):
+                continue
+            delta = turnover["elapsed"] - gap["elapsed"]
+            if 0 <= delta <= GAP_WINDOW:
+                candidates.append((delta, i, turnover))
+        if candidates:
+            delta, i, turnover = min(candidates, key=lambda x: (x[0], x[1]))
+            used.add(i)
+            matches.append({
+                "game_id": gap["game_id"], "period": gap["period"],
+                "gap_close_clock": gap["clock"], "turnover_clock": turnover["clock"],
+                "seconds_after_gap_close": delta,
+                "chance_flag_on_turnover_event": turnover["chance"],
+                "led_to_goal_flag_on_turnover_event": turnover["led_to_goal"],
+            })
+    return gaps, turnovers, matches
 
-    gap_turnover_rate = calculate_percentage(turnovers_after_gap, len(gap_close)) if len(gap_close) > 0 else 0
 
-    # Reference: how often is ANY other tracked event followed by a forced turnover within the window?
-    ref_events = team_data[
-        (~team_data['Event'].isin(['OZ Turnover Forced', 'D-Man Aggressive Gap Close'])) &
-        team_data['clock_seconds'].notna()
-    ]
-    ref_hits = sum(
-        1 for _, r in ref_events.iterrows()
-        if first_turnover_within(r['game_id'], r['Period'], r['clock_seconds']) is not None
-    )
-    ref_rate = calculate_percentage(ref_hits, len(ref_events))
+def load_v4_exports():
+    exports = []
+    for path in sorted(BASE_DIR.glob("*.csv")):
+        if path.name.lower() == "master_dataset.csv":
+            continue
+        try:
+            frame = pd.read_csv(path, keep_default_na=False)
+        except Exception:
+            continue
+        required = {"Source", "Event_Type", "Game_ID", "Game_Clock", "Team"}
+        if required.issubset(set(frame.columns)):
+            frame["__file"] = path.name
+            exports.append(frame)
+    return exports
 
-    metric4_results[team] = {
-        'activated_dman_events': len(activated_dman),
-        'dman_possessions': len(dman_possessions),
-        'dman_chances': dman_chances,
-        'dman_chance_rate': dman_chance_rate,
-        'gap_close_events': len(gap_close),
-        'turnovers_after_gap': turnovers_after_gap,
-        'gap_turnover_rate': gap_turnover_rate,
-        'gap_chance_poss': gap_chance_poss,
-        'gap_chance_broad': gap_chance_broad,
-        'gap_goals': gap_goals,
-        'gap_reference_rate': ref_rate
-    }
 
-    print(f"\n{team}:")
-    print(f"   'Activated D-Man (OZ)' events: {len(activated_dman)}")
-    print(f"   → Possessions with activated D-man: {len(dman_possessions)}")
-    print(f"   → Scoring chances generated: {dman_chances} ({dman_chance_rate:.1f}%)")
-    print(f"   'D-Man Aggressive Gap Close': {len(gap_close)}")
-    print(f"   → Turnovers forced within {GAP_WINDOW}s: {turnovers_after_gap} ({gap_turnover_rate:.1f}%)")
-    if turnovers_after_gap > 0:
-        print(f"      Of those {turnovers_after_gap}:")
-        print(f"      • Scoring chance in the turnover possession: {gap_chance_poss} "
-              f"({calculate_percentage(gap_chance_poss, turnovers_after_gap):.1f}%)")
-        print(f"      • Counting S marked on the gap close itself: {gap_chance_broad} "
-              f"({calculate_percentage(gap_chance_broad, turnovers_after_gap):.1f}%)")
-        print(f"      • Led to a goal: {gap_goals}")
-        if team in metric1_results:
-            print(f"      • For context, all turnover possessions: "
-                  f"{metric1_results[team]['turnover_chance_rate']:.1f}% had a chance")
-    print(f"   Reference: any other tracked event is followed by a forced turnover within "
-          f"{GAP_WINDOW}s {ref_rate:.1f}% of the time")
+def analyze_v4_exports(exports):
+    possession_rows = []
+    entry_rows = []
+    shot_rows = []
+    audit_rows = []
+    gap_rows = []
 
-print()
+    for frame in exports:
+        game_id = str(frame["Game_ID"].iloc[0]) if len(frame) else frame["__file"].iloc[0]
+        ducks = frame[frame["Team"].astype(str).str.upper().isin(["ANA", "DUCKS"])].copy()
+        if "Possession_ID" not in ducks.columns:
+            ducks["Possession_ID"] = ""
+        carryins = ducks[
+            (ducks["Event_Type"].astype(str) == "Zone Entry") &
+            (ducks["Event"].astype(str) == "Carry-in")
+        ]
+        shots = ducks[ducks["Event_Type"].astype(str) == "Shot"].copy()
+        audit_rows.append({
+            "file": frame["__file"].iloc[0], "game_id": game_id,
+            "rows": len(frame), "ducks_shots": len(shots),
+            "carry_ins": len(carryins),
+            "has_possession_ids": ducks["Possession_ID"].map(nonblank).any(),
+        })
 
-# === METRIC 5: SECOND-CHANCE PRESSURE (time-based) ===
-print("="*70)
-print("📊 METRIC 5: SECOND-CHANCE PRESSURE")
-print("="*70)
-print(f"   (After a scoring-chance shot, how often is there another within {SECOND_CHANCE_WINDOW}s?)")
+        for _, r in shots.iterrows():
+            if str(r.get("Possession_Class", "")) in {"Rush", "Early", "Sustained", "Extended"}:
+                shot_rows.append({
+                    "game_id": game_id,
+                    "category": str(r.get("Possession_Class")),
+                    "chance": yes(r.get("Is_Scoring_Chance", "NO")) or yes(r.get("Second_Chance", "NO")) or yes(r.get("Third_Plus_Chance", "NO")),
+                    "goal": str(r.get("Shot_Result", "")).strip().lower() == "goal",
+                    "event_id": str(r.get("Event_ID", "")),
+                })
 
-metric5_results = {}
+        if not ducks["Possession_ID"].map(nonblank).any():
+            continue
 
-for team in sorted(df['team'].unique()):
-    team_data = df[df['team'] == team].copy()
-    team_data['clock_seconds'] = team_data['Game_Clock'].apply(clock_to_seconds)
-    team_data['period_str'] = team_data['Period'].astype(str)
+        ducks["__pid"] = ducks["Possession_ID"].astype(str)
+        ducks = ducks[ducks["__pid"].map(nonblank)]
+        for pid, group in ducks.groupby("__pid"):
+            group_shots = group[group["Event_Type"].astype(str) == "Shot"]
+            has_entry = ((group["Event_Type"].astype(str) == "Zone Entry") &
+                         (group["Event"].astype(str) == "Carry-in")).any()
+            has_turnover = (group["Event"].astype(str) == "OZ Turnover Forced").any()
+            has_activation = (group["Event"].astype(str) == "Activated D-Man (OZ)").any()
+            has_gap = (group["Event"].astype(str) == "D-Man Aggressive Gap Close").any()
+            chance = group["Is_Scoring_Chance"].map(yes).any()
+            if "Second_Chance" in group:
+                chance = chance or group["Second_Chance"].map(yes).any()
+            if "Third_Plus_Chance" in group:
+                chance = chance or group["Third_Plus_Chance"].map(yes).any()
+            goal = group_shots["Shot_Result"].astype(str).str.lower().eq("goal").any()
+            possession_rows.append({
+                "game_id": game_id, "possession_id": pid,
+                "has_entry": has_entry, "has_turnover": has_turnover,
+                "has_activation": has_activation, "has_gap_close": has_gap,
+                "shots": len(group_shots), "chance": bool(chance), "goal": bool(goal),
+            })
 
-    is_shot = team_data['shot_number_in_possession'].notna()
-    s_rows = team_data[team_data['Is_Scoring_Chance'] == 'YES']
-    s_on_shots = int(is_shot[s_rows.index].sum())
+        if "Elapsed_Seconds" in ducks.columns:
+            gap_events = ducks[ducks["Event"].astype(str) == "D-Man Aggressive Gap Close"]
+            turnover_events = ducks[ducks["Event"].astype(str) == "OZ Turnover Forced"]
+            used = set()
+            for _, gap in gap_events.iterrows():
+                try:
+                    gt = float(gap["Elapsed_Seconds"])
+                except Exception:
+                    continue
+                candidates = []
+                for idx, turnover in turnover_events.iterrows():
+                    if idx in used:
+                        continue
+                    try:
+                        delta = float(turnover["Elapsed_Seconds"]) - gt
+                    except Exception:
+                        continue
+                    if 0 <= delta <= GAP_WINDOW:
+                        candidates.append((delta, idx, turnover))
+                if candidates:
+                    delta, idx, turnover = min(candidates, key=lambda x: x[0])
+                    used.add(idx)
+                    gap_rows.append({
+                        "game_id": game_id, "gap_clock": gap["Game_Clock"],
+                        "turnover_clock": turnover["Game_Clock"], "seconds_after": delta,
+                    })
 
-    chance_shots = team_data[
-        is_shot & (team_data['Is_Scoring_Chance'] == 'YES') & team_data['clock_seconds'].notna()
-    ].sort_values(['game_id', 'period_str', 'clock_seconds'], ascending=[True, True, False])
+    return possession_rows, shot_rows, audit_rows, gap_rows
 
-    rows = chance_shots[['game_id', 'period_str', 'clock_seconds']].values.tolist()
-    followed = 0
-    gaps = []
-    for i in range(len(rows) - 1):
-        g1, p1, t1 = rows[i]
-        g2, p2, t2 = rows[i + 1]
-        if g1 == g2 and p1 == p2 and 0 <= t1 - t2 <= SECOND_CHANCE_WINDOW:
-            followed += 1
-            gaps.append(t1 - t2)
 
-    follow_rate = calculate_percentage(followed, len(chance_shots))
-    avg_gap = sum(gaps) / len(gaps) if gaps else 0
+def rate_text(successes, total):
+    if total <= 0:
+        return "n/a"
+    lo, hi = wilson(successes, total)
+    return f"{100*successes/total:.1f}% ({successes}/{total}; Wilson 95% CI {100*lo:.1f}–{100*hi:.1f}%)"
 
-    metric5_results[team] = {
-        'chance_shots': len(chance_shots),
-        'followed': followed,
-        'follow_rate': follow_rate,
-        'avg_gap': avg_gap,
-        's_on_shots': s_on_shots,
-        's_total': len(s_rows)
-    }
 
-    print(f"\n{team}:")
-    print(f"   Scoring chances marked on shot events: {s_on_shots} of {len(s_rows)} "
-          f"(the rest are marked on turnovers, D-man events, etc.)")
-    print(f"   Chance shots: {len(chance_shots)}")
-    print(f"   → Followed by another chance shot within {SECOND_CHANCE_WINDOW}s: {followed} ({follow_rate:.1f}%)")
-    if gaps:
-        print(f"   Avg gap between them: {avg_gap:.1f}s")
-    if len(chance_shots) < 30:
-        print(f"   ⚠️  Only {len(chance_shots)} chance shots - treat this rate as rough")
+def main():
+    print("=" * 72)
+    print("HOCKEY UNTAPPED — DATA AUDIT & ANALYTICS")
+    print("=" * 72)
 
-print()
+    games = read_legacy_games()
+    if games:
+        raw = pd.concat(games, ignore_index=True)
+        events, all_events = legacy_event_audit(games)
+        shots, ambiguous = make_legacy_shots(games)
+        games_n = len(games)
+        event_n = len(raw)
+        event_counts = raw["Event"].astype(str).value_counts()
+        carryins = int((raw["Event"].astype(str).str.strip() == "Carry-in").sum())
+        goal_rows = int(raw["Shot_Result"].astype(str).str.strip().str.lower().eq("goal").sum())
+        led_tags = int(raw["Led_To_Goal"].map(yes).sum())
+        chance_flags = int(raw["Is_Scoring_Chance"].map(yes).sum())
 
-# === EXPORT SUMMARY REPORT ===
-print("="*70)
-print("💾 EXPORTING SUMMARY REPORTS")
-print("="*70)
+        print(f"\nLEGACY MANUAL DATA: {games_n} games, {event_n:,} raw rows")
+        print(f"  Actual Carry-in events recorded: {carryins}")
+        print("  Entry-based shot timing: NOT AVAILABLE for this cohort")
+        print(f"  Legacy shot observations reconstructed: {len(shots)}")
+        print(f"  Scoring-chance flags on raw event rows: {chance_flags}")
+        print(f"  Led_To_Goal attribution tags: {led_tags}")
+        print(f"  Actual Shot_Result=Goal rows: {goal_rows}")
+        print("  NOTE: Led_To_Goal is an attribution tag, not a goal counter.")
 
-# Create summary dataframe for each metric
-summary_data = []
+        event_summary = []
+        for name in ["OZ Turnover Forced", "D-Man Aggressive Gap Close",
+                     "Activated D-Man (OZ)", "DZ → OZ Transition Completed",
+                     "Stretch Pass → OZ Possession", "DZ Blueline Play Shut Down"]:
+            subset = events[events["event"] == name]
+            event_summary.append({
+                "Event": name, "Count": len(subset),
+                "Chance_Flag_On_Event": int(subset["chance_flag"].sum()),
+                "Led_To_Goal_Tags_On_Event": int(subset["led_to_goal_flag"].sum()),
+            })
 
-for team in sorted(df['team'].unique()):
-    row = {'Team': team}
+        turnover_n = int((events["event"] == "OZ Turnover Forced").sum())
+        turnover_chance_flags = int(events.loc[events["event"] == "OZ Turnover Forced", "chance_flag"].sum())
+        gaps, turnovers, matches = gap_close_matches(all_events)
+        print(f"\n  Turnover events: {turnover_n}")
+        print(f"  Chance flag placed directly on turnover event: {rate_text(turnover_chance_flags, turnover_n)}")
+        print(f"  Gap closes: {len(gaps)}")
+        print(f"  Unique gap-close → turnover temporal matches within {GAP_WINDOW}s: {len(matches)}/{len(gaps)}")
+        print("  This is a timing association only; it does not prove the gap close caused the turnover.")
+        print("  Turnover-possession outcomes and D-man possession outcomes are withheld for legacy data:")
+        print("  the raw files omit full NHL event sequences and do not contain trustworthy possession IDs.")
 
-    # Metric 1
-    if team in metric1_results:
-        row['Turnovers_Forced'] = metric1_results[team]['total_turnovers']
-        row['Turnover_Chance_Rate_%'] = metric1_results[team]['turnover_chance_rate']
-        row['Turnover_Advantage_%'] = metric1_results[team]['turnover_chance_rate'] - metric1_results[team]['non_turnover_chance_rate']
+        categories = ["Rush", "Early", "Sustained", "Extended", "2nd chance", "3rd+ chance", "descriptor-only"]
+        shot_summary = []
+        for category in categories:
+            subset = [x for x in shots if x["category"] == category]
+            if not subset:
+                continue
+            chance_n = sum(x["chance"] for x in subset)
+            goal_n = sum(x["goal"] for x in subset)
+            ci_lo, ci_hi = cluster_bootstrap_rate(subset, "chance")
+            shot_summary.append({
+                "Cohort": "Legacy manually assigned timing / tags",
+                "Category": category, "Shots": len(subset),
+                "Scoring_Chance": chance_n, "Chance_Rate_%": round(100*chance_n/len(subset), 2),
+                "Chance_Rate_Game_Cluster_CI_Low_%": round(100*ci_lo, 2) if ci_lo is not None else "",
+                "Chance_Rate_Game_Cluster_CI_High_%": round(100*ci_hi, 2) if ci_hi is not None else "",
+                "Actual_Goals": goal_n, "Goal_Rate_%": round(100*goal_n/len(subset), 2),
+            })
+            print(f"  {category:16} n={len(subset):3} | chance {rate_text(chance_n, len(subset))} | actual goals {goal_n}/{len(subset)} ({100*goal_n/len(subset):.1f}%)")
 
-    # Metric 2
-    if team in metric2_results:
-        row['Rush_Chance_Rate_%'] = metric2_results[team]['Rush']['chance_rate']
-        row['Extended_Chance_Rate_%'] = metric2_results[team]['Extended']['chance_rate']
-        row['Speed_Advantage_%'] = metric2_results[team]['Rush']['chance_rate'] - metric2_results[team]['Extended']['chance_rate']
+        traffic = [x for x in shots if x["traffic"]]
+        low = [x for x in shots if x["low_value"]]
+        descriptor_summary = []
+        for name, subset in [("Traffic tag (overlaps timing groups)", traffic), ("Low-value tag", low)]:
+            if subset:
+                descriptor_summary.append({
+                    "Descriptor": name, "Shots": len(subset),
+                    "Scoring_Chance": sum(x["chance"] for x in subset),
+                    "Chance_Rate_%": round(100*sum(x["chance"] for x in subset)/len(subset), 2),
+                    "Actual_Goals": sum(x["goal"] for x in subset),
+                    "Goal_Rate_%": round(100*sum(x["goal"] for x in subset)/len(subset), 2),
+                })
+        print("\n  Descriptor rates include overlap with timing categories; do not add them to timing-group totals.")
+        for d in descriptor_summary:
+            print(f"  {d['Descriptor']}: {d['Shots']} shots, chance {d['Chance_Rate_%']:.1f}%, actual goals {d['Actual_Goals']} ({d['Goal_Rate_%']:.1f}%)")
 
-    # Metric 3
-    if team in metric3_results:
-        row['Avg_Shots_Per_Possession'] = metric3_results[team]['avg_shots_per_poss']
-        row['Possession_Chance_Rate_%'] = metric3_results[team]['chance_poss_rate']
-        row['Traffic_Shot_Chance_Rate_%'] = metric3_results[team]['traffic_chance_rate']
+        pd.DataFrame(event_summary).to_csv(REPORTS_DIR / "legacy_event_audit.csv", index=False)
+        pd.DataFrame(shot_summary).to_csv(REPORTS_DIR / "legacy_shot_metrics.csv", index=False)
+        pd.DataFrame(descriptor_summary).to_csv(REPORTS_DIR / "legacy_descriptor_metrics.csv", index=False)
+        pd.DataFrame(matches).to_csv(REPORTS_DIR / "legacy_gap_close_matches.csv", index=False)
+        pd.DataFrame([{
+            "Games": games_n, "Raw_Events": event_n, "Carry_in_Events": carryins,
+            "Legacy_Shots_Reconstructed": len(shots), "Ambiguous_Descriptor_Collisions": ambiguous,
+            "Scoring_Chance_Event_Flags": chance_flags, "Led_To_Goal_Tags": led_tags,
+            "Actual_Goal_Shot_Rows": goal_rows, "Turnover_Events": turnover_n,
+            "Turnover_Event_Chance_Flags": turnover_chance_flags,
+            "Gap_Close_Events": len(gaps), "Unique_Gap_To_Turnover_Matches": len(matches),
+        }]).to_csv(REPORTS_DIR / "legacy_data_quality_audit.csv", index=False)
+    else:
+        print("\nNo legacy raw game CSVs found.")
 
-    # Metric 4
-    if team in metric4_results:
-        m4 = metric4_results[team]
-        row['DMan_Activation_Chance_Rate_%'] = m4['dman_chance_rate']
-        row['Gap_Close_Turnover_Rate_%'] = m4['gap_turnover_rate']
-        row['Gap_Close_Turnover_Reference_%'] = m4['gap_reference_rate']
-        row['Gap_Turnover_Chance_Rate_%'] = calculate_percentage(m4['gap_chance_poss'], m4['turnovers_after_gap'])
+    exports = load_v4_exports()
+    if exports:
+        possessions, v4_shots, audit, v4_gaps = analyze_v4_exports(exports)
+        print(f"\nV4 EXPORTS: {len(exports)} game export(s)")
+        for a in audit:
+            print(f"  {a['file']}: {a['ducks_shots']} Ducks shots, {a['carry_ins']} carry-ins, possession IDs: {'yes' if a['has_possession_ids'] else 'no'}")
+        if possessions:
+            pdf = pd.DataFrame(possessions)
+            for label, subset in [
+                ("All tracked possessions", pdf),
+                ("Carry-in possessions", pdf[pdf["has_entry"]]),
+                ("Forced-turnover possessions", pdf[pdf["has_turnover"]]),
+                ("Possessions with activated D-man", pdf[pdf["has_activation"]]),
+            ]:
+                if len(subset):
+                    print(f"  {label}: {len(subset)} | chance {rate_text(int(subset['chance'].sum()), len(subset))} | goals {int(subset['goal'].sum())}/{len(subset)}")
+            pdf.to_csv(REPORTS_DIR / "v4_possession_metrics.csv", index=False)
+        else:
+            print("  No exported Possession_ID values yet; possession-level V4 metrics will populate after the updated tracker is used.")
+        if v4_shots:
+            shotdf = pd.DataFrame(v4_shots)
+            rows = []
+            for category, group in shotdf.groupby("category"):
+                rows.append({
+                    "Category": category, "Shots": len(group),
+                    "Scoring_Chance": int(group["chance"].sum()),
+                    "Chance_Rate_%": round(100*group["chance"].mean(), 2),
+                    "Actual_Goals": int(group["goal"].sum()),
+                    "Goal_Rate_%": round(100*group["goal"].mean(), 2),
+                })
+            pd.DataFrame(rows).to_csv(REPORTS_DIR / "v4_entry_timing_metrics.csv", index=False)
+        pd.DataFrame(audit).to_csv(REPORTS_DIR / "v4_export_audit.csv", index=False)
+        pd.DataFrame(v4_gaps).to_csv(REPORTS_DIR / "v4_gap_close_matches.csv", index=False)
+    else:
+        print("\nNo V4 game exports found in the repository root.")
 
-    # Metric 5
-    if team in metric5_results:
-        row['Chance_Shots'] = metric5_results[team]['chance_shots']
-        row[f'Second_Chance_Within_{SECOND_CHANCE_WINDOW}s_%'] = metric5_results[team]['follow_rate']
+    print(f"\nReports written to: {REPORTS_DIR}")
+    print("Historical entry timing is intentionally excluded until actual Carry-in records exist.")
+    print("=" * 72)
 
-    summary_data.append(row)
 
-summary_df = pd.DataFrame(summary_data)
-summary_file = os.path.join(REPORTS_DIR, "analytics_summary.csv")
-summary_df.to_csv(summary_file, index=False)
-
-print(f"\n✅ Summary report saved: {summary_file}")
-print(f"📁 All reports saved to: {REPORTS_DIR}")
-print("\n" + "="*70)
-print("✅ ANALYTICS COMPLETE!")
-print("="*70)
+if __name__ == "__main__":
+    main()
