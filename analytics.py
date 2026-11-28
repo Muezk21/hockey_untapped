@@ -291,7 +291,7 @@ def analyze_v4_exports(exports):
                          (group["Event"].astype(str) == "Carry-in")).any()
             has_turnover = (group["Event"].astype(str) == "OZ Turnover Forced").any()
             has_activation = (group["Event"].astype(str) == "Activated D-Man (OZ)").any()
-            has_gap = (group["Event"].astype(str) == "D-Man Aggressive Gap Close").any()
+            has_gap = group["Event"].astype(str).isin(["D-Man Gap Close", "D-Man Aggressive Gap Close"]).any()
             chance = group["Is_Scoring_Chance"].map(yes).any()
             if "Second_Chance" in group:
                 chance = chance or group["Second_Chance"].map(yes).any()
@@ -306,7 +306,7 @@ def analyze_v4_exports(exports):
             })
 
         if "Elapsed_Seconds" in ducks.columns:
-            gap_events = ducks[ducks["Event"].astype(str) == "D-Man Aggressive Gap Close"]
+            gap_events = ducks[ducks["Event"].astype(str).isin(["D-Man Gap Close", "D-Man Aggressive Gap Close"])]
             turnover_events = ducks[ducks["Event"].astype(str) == "OZ Turnover Forced"]
             used = set()
             for _, gap in gap_events.iterrows():
