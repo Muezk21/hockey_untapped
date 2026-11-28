@@ -506,6 +506,8 @@ function reclassify() {
   if (!game) return;
   const team = analyzedTeam();
   const items = [];
+  let possessionSerial = 0;
+  let entrySerial = 0;
   official.forEach(e => {
     if (e.kind === "shot") {
       items.push({ k: tkey(e.pn, e.elapsed), prio: 1, ord: e.sort, src: "api", e });
@@ -544,8 +546,8 @@ function reclassify() {
                                     (e.kind === "giveaway" && !turnoverByAnalyzedTeam);
         const label = e.kind + " by " + e.team + " at " + e.period + " " + e.clock;
         if (ducksGainPossession) {
-          poss = { pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: label,
-                   entry: null, entryClock: "", entryType: "", used: false };
+          poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: label,
+                   entry: null, entryClock: "", entryType: "", entryId: "", used: false };
           lastReset = label + " (Anaheim possession begins; awaiting carry-in)";
         } else {
           reset(label + " (Anaheim possession ends)");
@@ -555,15 +557,15 @@ function reclassify() {
       }
     } else if (it.src === "entry") {
       if (poss && poss.pn === e.pn && poss.entry === null && !poss.used) {
-        poss.entry = e.elapsed; poss.entryClock = e.clock; poss.entryType = e.entryType;
+        poss.entry = e.elapsed; poss.entryClock = e.clock; poss.entryType = e.entryType; poss.entryId = game.id + "-E" + (++entrySerial);
       } else {
-        poss = { pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
-                 entry: e.elapsed, entryClock: e.clock, entryType: e.entryType, used: false };
+        poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
+                 entry: e.elapsed, entryClock: e.clock, entryType: e.entryType, entryId: game.id + "-E" + (++entrySerial), used: false };
       }
     } else {
       if (e.event === "OZ Turnover Forced" || e.event === "DZ Blueline Play Shut Down") {
-        poss = { pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
-                 entry: null, entryClock: "", entryType: "", used: false };
+        poss = { id: game.id + "-" + (++possessionSerial), pn: e.pn, startElapsed: e.elapsed, startClock: e.clock, startType: e.event,
+                 entry: null, entryClock: "", entryType: "", entryId: "", used: false };
       } else if (e.event === "Lost Possession") {
         reset("Lost Possession (your L) at " + e.period + " " + e.clock);
       }
@@ -576,7 +578,7 @@ function reclassify() {
 }
 
 function classifyOwnShot(e, poss, lastReset) {
-  e.sec = null; e.secStart = null;
+  e.sec = null; e.secStart = null; e.possessionId = poss ? poss.id : ""; e.entryId = poss ? poss.entryId : "";
   if (e.elapsed === null) { e.cls = "Unclassified"; e.why = "The NHL did not provide a time for this shot."; return; }
   if (poss && poss.pn !== e.pn) poss = null;
   if (!poss) {
@@ -883,7 +885,7 @@ document.addEventListener("keydown", e => {
 // EXPORT
 // ============================================================
 const CSV_COLS = ["Team","Game_Clock","Period","Event","Is_Scoring_Chance","Penalty_Drawn","Led_To_Goal","Shot_Result",
-  "Source","Game_ID","Game_Date","Home_Team","Away_Team","Event_Type","Event_ID","Shooter","Shot_Type","Strength",
+  "Source","Game_ID","Game_Date","Home_Team","Away_Team","Event_Type","Event_ID","Possession_ID","Entry_ID","Shooter","Shot_Type","Strength",
   "Possession_Class","Entry_Type","Seconds_Since_Entry","Seconds_Since_Possession_Start",
   "Second_Chance","Third_Plus_Chance","Traffic","Low_Value","Zone","X","Y","Elapsed_Seconds","Notes"];
 
@@ -900,7 +902,7 @@ function buildRows() {
       rows.push({ key: tkey(e.pn, e.elapsed), prio: 1, ord: e.sort, r: Object.assign({}, common, {
         Team: e.team, Game_Clock: e.clock, Period: e.period, Event: CLASS_EVENT[e.cls] || e.cls,
         Is_Scoring_Chance: yn(t.chance), Penalty_Drawn: "NO", Led_To_Goal: yn(e.result === "Goal"), Shot_Result: e.result,
-        Source: "NHL API", Event_Type: "Shot", Event_ID: e.apiId, Shooter: e.shooter, Shot_Type: e.shotType, Strength: e.strength,
+        Source: "NHL API", Event_Type: "Shot", Event_ID: e.apiId, Possession_ID: e.possessionId || "", Entry_ID: e.entryId || "", Shooter: e.shooter, Shot_Type: e.shotType, Strength: e.strength,
         Possession_Class: e.cls, Seconds_Since_Entry: e.sec ?? "", Seconds_Since_Possession_Start: e.secStart ?? "",
         Second_Chance: yn(t.second), Third_Plus_Chance: yn(t.third), Traffic: yn(t.traffic), Low_Value: yn(t.low),
         Zone: e.zone, X: e.x ?? "", Y: e.y ?? "", Elapsed_Seconds: e.elapsed ?? "", Notes: e.why }) });
