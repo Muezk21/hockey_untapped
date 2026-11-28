@@ -1,55 +1,65 @@
-HOCKEY UNTAPPED — METRIC DEFINITIONS (V4)
+HOCKEY UNTAPPED — METRIC DEFINITIONS
 
-CORE DISTINCTION
-- A zone entry and a possession are not interchangeable.
-- Carry-in = manually recorded Anaheim controlled carry across the offensive blue line.
-- Only Carry-in starts the entry-to-shot clock.
-- DZ → OZ Transition Completed and Stretch Pass → OZ Possession are descriptive puck-movement events. They do NOT start the entry clock.
-- Takeaways / opponent giveaways can start an Anaheim tracked possession sequence, but do NOT count as zone entries.
-- Opponent takeaways / Anaheim giveaways end the Anaheim tracked sequence.
-- Dump-ins and uncontrolled entries are not counted as carry-ins.
-- Track Anaheim entries only for this study.
+DEFENSIVE PERFORMANCE
+
+Entry Denial
+A defensive action in which the defending team prevents an opponent from entering the offensive zone with controlled possession.
+
+D-Man Gap Close
+A defenseman closes the distance to an attacking opponent to reduce time, space, or available options. Record only when the defender actively closes the gap, not merely because the players are near each other.
+
+Forced OZ Turnover
+An offensive-zone defensive action in which pressure or a defensive play causes the opponent to lose possession and the defending team gains or contests the puck. Do not count an unforced opponent error as a forced turnover unless the defensive action materially contributed.
+
+TRANSITION AND PUCK MOVEMENT
+
+DZ → OZ Transition Completed
+A sequence in which the team moves the puck from its defensive zone into the offensive zone with controlled team possession. This is a transition event, not automatically a carry-in; it does not start the entry-to-shot clock unless a separate controlled carry-in is recorded.
+
+Stretch Pass → OZ Possession
+A long pass from the defensive or neutral-zone area that reaches a teammate and results in controlled offensive-zone possession. The pass alone does not qualify if the receiving team does not establish possession.
+
+Controlled Carry-in
+An Anaheim player carries the puck across the opponent's offensive blue line while maintaining control. Exclude dump-ins, chips, uncontrolled touches, and entries where the team does not retain control. This is the entry event that starts the entry-to-shot timing clock.
+
+OFFENSIVE INVOLVEMENT AND POSSESSION
+
+Activated Defenseman (OZ)
+A defenseman joins or advances into the offensive-zone attack beyond their normal supporting position to become an active passing, shooting, or puck-support option.
+
+Lost Possession
+The analyzed team loses control of the puck during a tracked sequence. Do not count a temporary bobble if the same team immediately retains clear control without an opponent gaining possession.
 
 SHOT TIMING
-- Timing is measured from the most recent recorded Anaheim Carry-in to the first shot in that tracked sequence.
-- Rush: 0–4.99 seconds.
-- Early: 5–10 seconds inclusive.
-- Sustained: >10–30 seconds inclusive.
-- Extended: >30 seconds.
-- A shot before a recorded carry-in is Unclassified for entry timing. Never infer an entry.
-- Follow-up shots remain Follow-up; their Second_Chance / Third_Plus_Chance tags are separate shot-quality modifiers and are not extra entries.
-- Timing classes describe the first shot after a carry-in; do not interpret them as timing labels for every shot in a sequence.
 
-IDENTIFIERS IN V4 EXPORT
-- Possession_ID is a tracker-generated ID for a tracked Anaheim sequence. It is not a complete NHL possession reconstruction: faceoffs, all loose-puck recoveries, and every change of control are not fully modeled.
-- Entry_ID uniquely identifies a recorded Carry-in and is the authoritative link for entry-based timing.
-- Use Entry_ID plus nonnegative Seconds_Since_Entry to validate entry-timing rows.
-- Use Possession_ID only for tracked-sequence summaries, and label those summaries as tracked sequences rather than all game possessions.
-- Event_ID is the NHL play-by-play event identifier for API events.
-- IDs are regenerated deterministically when the tracker reclassifies the current game; export the CSV after finishing manual event logging.
+Rush Shot
+The first shot after a recorded controlled carry-in, taken 0 to less than 5 seconds after the entry.
 
-SCORING CHANCE AND GOAL OUTCOMES
-- Scoring chance is a manually applied shot tag (hybrid workflow); a chance tag on a manual event is not a shot.
-- Actual goals are counted from Shot_Result = Goal, not Led_To_Goal.
-- Led_To_Goal is an attribution marker only and must never be used as a goal counter.
-- Second_Chance and Third_Plus_Chance are shot-level modifiers. Report their denominators as tagged shots, not all events.
-- Traffic and Low_Value are overlapping shot descriptors. Do not add their counts to timing-group totals.
+Early Possession Shot
+The first shot after a recorded controlled carry-in, taken from 5 through 10 seconds after the entry, inclusive.
 
-DEFENSIVE / TURNOVER EVENTS
-- OZ Turnover Forced is a manually recorded event; a subsequent chance/shot should be attributed only when it shares a valid tracked-sequence ID.
-- D-Man Gap Close and Activated D-Man are manual observations. Temporal proximity alone is association, not proof of causation.
-- Do not claim a D-Man action caused a turnover or scoring chance without a linked sequence and a defensible comparison group.
+Sustained Possession Shot
+The first shot after a recorded controlled carry-in, taken more than 10 and up to 30 seconds after the entry, inclusive.
 
-LEGACY DATA
-- Older raw CSVs do not contain recorded carry-in events, Entry_ID, or trustworthy possession IDs.
-- Historical Rush / Early / Sustained / Extended labels are legacy manually assigned categories, not measured time from an observed carry-in.
-- Keep legacy observations separate from V4 entry-based metrics.
-- Do not calculate legacy possession outcomes or entry conversion rates.
-- Historical sample size is small and game-clustered; descriptive results only, no predictive claims.
+Extended Possession Shot
+The first shot after a recorded controlled carry-in, taken more than 30 seconds after the entry.
 
-RECOMMENDED REPORTING
-- Shot-level: scoring-chance rate and actual-goal rate, with n and uncertainty interval.
-- Entry-level: entries with at least one shot / all recorded carry-ins; entries with at least one chance / all recorded carry-ins; entries with a goal / all recorded carry-ins. Keep the denominator at entries.
-- Tracked-sequence level: share with a shot, share with a chance, share with a goal, and shots per tracked sequence. Explicitly state the sequence coverage limitation above.
-- Defensive-action level: report counts and linked outcomes only where the same tracked-sequence ID supports the link. Otherwise label temporal matches as descriptive associations.
-- Treat n<20 as highly unstable; n<50 as exploratory. Require more games and repeated observations before predictive modeling.
+Follow-up Shot
+A subsequent shot in the same tracked sequence after the first shot. It is not assigned a new entry-timing category. Second/Third+ Chance tags are separate shot-level labels.
+
+SHOT QUALITY AND PRESSURE
+
+Scoring Chance
+A shot manually tagged when it meets Hockey Untapped's scoring-chance criteria. Apply the same written criteria across games and reviewers; a chance tag on a non-shot manual event is not a shot-level scoring chance.
+
+Second Chance
+A follow-up shot created after the initial attempt in the same attacking sequence, such as a rebound or loose-puck recovery, and manually tagged as the second scoring opportunity.
+
+Third+ Chance
+A third or later follow-up scoring opportunity in the same attacking sequence, manually tagged when the attack produces another distinct attempt after earlier attempts.
+
+Traffic
+A shot manually tagged when one or more players meaningfully obstruct or complicate the goalie's view or ability to track the puck. Mere player presence near the net is not sufficient.
+
+Low-Value Shot
+A shot manually tagged as presenting limited scoring threat under Hockey Untapped's shot-quality criteria, considering factors such as distance, angle, pressure, and whether the attempt has a realistic path to the net.
